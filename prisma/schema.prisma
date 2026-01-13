@@ -1,0 +1,601 @@
+// Prisma Schema for Beddora SaaS
+// Enhanced schema with authentication, authorization, and multi-account support
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// AUTHENTICATION & AUTHORIZATION
+// ============================================
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  password      String
+  name          String?
+  isActive      Boolean  @default(true)
+  emailVerified Boolean  @default(false)
+  emailVerifiedAt DateTime?
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  roles         UserRole[]
+  userAccounts  UserAccount[]
+  userPermissions UserPermission[]
+  refreshTokens RefreshToken[]
+  emailVerifications EmailVerification[]
+  passwordResets PasswordReset[]
+  auditLogs     AuditLog[]
+
+  @@index([email])
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique // 'ADMIN', 'MANAGER', 'VIEWER'
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  name        String   @unique // 'profit.read', 'inventory.write', etc.
+  resource    String   // 'profit', 'inventory', 'ppc', 'alerts'
+  action      String   // 'read', 'write', 'delete', 'none'
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  rolePermissions RolePermission[]
+  userPermissions UserPermission[]
+
+  @@index([resource, action])
+  @@map("permissions")
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id           String   @id @default(uuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+
+  // Relations
+  role         Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserPermission {
+  id           String   @id @default(uuid())
+  userId       String
+  accountId    String?  // Null for global permissions, set for account-specific
+  permissionId String
+  createdAt    DateTime @default(now())
+
+  // Relations
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account      Account? @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, accountId, permissionId])
+  @@index([userId, accountId])
+  @@map("user_permissions")
+}
+
+// ============================================
+// TOKEN MANAGEMENT
+// ============================================
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model EmailVerification {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  verified  Boolean  @default(false)
+  verifiedAt DateTime?
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("email_verifications")
+}
+
+model PasswordReset {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("password_resets")
+}
+
+// ============================================
+// ACCOUNTS & MARKETPLACES
+// ============================================
+
+model Account {
+  id          String   @id @default(uuid())
+  name        String
+  sellerId    String?  // Amazon Seller ID
+  region      String?  // 'us', 'eu', 'uk', etc.
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  userAccounts UserAccount[]
+  marketplaces AccountMarketplace[]
+  userPermissions UserPermission[]
+  products    Product[]
+  orders      Order[]
+  ppcCampaigns PPC_Campaign[]
+  expenses    Expense[]
+  cashflow    Cashflow[]
+
+  @@index([sellerId])
+  @@map("accounts")
+}
+
+model Marketplace {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  code        String   @unique // 'amazon', 'ebay', etc.
+  region      String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  accountMarketplaces AccountMarketplace[]
+
+  @@map("marketplaces")
+}
+
+model UserAccount {
+  id          String   @id @default(uuid())
+  userId      String
+  accountId   String
+  isActive    Boolean  @default(true)
+  isDefault   Boolean  @default(false) // Default account for user
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, accountId])
+  @@index([userId])
+  @@index([accountId])
+  @@map("user_accounts")
+}
+
+model AccountMarketplace {
+  id           String   @id @default(uuid())
+  accountId    String
+  marketplaceId String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  account      Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace  Marketplace @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, marketplaceId])
+  @@index([accountId])
+  @@index([marketplaceId])
+  @@map("account_marketplaces")
+}
+
+// ============================================
+// PRODUCTS & INVENTORY
+// ============================================
+
+model Product {
+  id              String   @id @default(uuid())
+  accountId       String
+  sku             String
+  asin            String?
+  title           String
+  imageUrl        String?
+  category        String?
+  brand           String?
+  currentPrice    Decimal  @default(0)
+  cost            Decimal  @default(0)
+  quantity        Int      @default(0)
+  reorderLevel    Int      @default(10)
+  status          String   @default("active")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  orderItems      OrderItem[]
+  inventory       Inventory[]
+  purchaseOrders  PurchaseOrderItem[]
+
+  @@unique([accountId, sku])
+  @@index([accountId])
+  @@index([asin])
+  @@map("products")
+}
+
+model Inventory {
+  id          String   @id @default(uuid())
+  productId   String
+  quantity    Int
+  changeType  String
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  // Relations
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@map("inventory")
+}
+
+model Supplier {
+  id          String   @id @default(uuid())
+  name        String
+  email       String?
+  phone       String?
+  address     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  purchaseOrders PurchaseOrder[]
+
+  @@map("suppliers")
+}
+
+model PurchaseOrder {
+  id          String   @id @default(uuid())
+  supplierId  String
+  accountId   String
+  orderNumber String   @unique
+  status      String   @default("pending")
+  totalAmount Decimal  @default(0)
+  orderDate   DateTime @default(now())
+  expectedDate DateTime?
+  receivedDate DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  supplier    Supplier @relation(fields: [supplierId], references: [id])
+  items       PurchaseOrderItem[]
+
+  @@index([supplierId])
+  @@index([accountId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              String   @id @default(uuid())
+  purchaseOrderId String
+  productId       String
+  quantity        Int
+  unitCost        Decimal
+  totalCost       Decimal
+  createdAt       DateTime @default(now())
+
+  // Relations
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product         Product       @relation(fields: [productId], references: [id])
+
+  @@index([purchaseOrderId])
+  @@index([productId])
+  @@map("purchase_order_items")
+}
+
+// ============================================
+// ORDERS & SALES
+// ============================================
+
+model Order {
+  id              String   @id @default(uuid())
+  accountId       String
+  orderId         String   @unique
+  orderDate       DateTime
+  shipDate        DateTime?
+  orderStatus     String
+  totalAmount     Decimal  @default(0)
+  shippingCost    Decimal  @default(0)
+  tax             Decimal  @default(0)
+  currency        String   @default("USD")
+  marketplace     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  items           OrderItem[]
+  fees            Fee[]
+  refunds         Refund[]
+
+  @@index([accountId])
+  @@index([orderId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id              String   @id @default(uuid())
+  orderId         String
+  productId       String
+  sku             String
+  quantity        Int
+  unitPrice       Decimal
+  totalPrice      Decimal
+  createdAt       DateTime @default(now())
+
+  // Relations
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product         Product  @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model Fee {
+  id          String   @id @default(uuid())
+  orderId     String
+  feeType     String
+  amount      Decimal
+  description String?
+  createdAt   DateTime @default(now())
+
+  // Relations
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("fees")
+}
+
+model Refund {
+  id          String   @id @default(uuid())
+  orderId     String
+  refundId    String   @unique
+  amount      Decimal
+  reason      String?
+  status      String   @default("pending")
+  refundDate DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("refunds")
+}
+
+// ============================================
+// PPC & ADVERTISING
+// ============================================
+
+model PPC_Campaign {
+  id              String   @id @default(uuid())
+  accountId       String
+  campaignId      String
+  name            String
+  platform        String   @default("amazon")
+  status          String   @default("active")
+  budget          Decimal  @default(0)
+  spend           Decimal  @default(0)
+  impressions     Int      @default(0)
+  clicks          Int      @default(0)
+  conversions     Int      @default(0)
+  acos            Decimal?
+  roas            Decimal?
+  startDate       DateTime
+  endDate         DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([campaignId])
+  @@map("ppc_campaigns")
+}
+
+// ============================================
+// EXPENSES & CASHFLOW
+// ============================================
+
+model Expense {
+  id          String   @id @default(uuid())
+  accountId   String
+  category    String
+  amount      Decimal
+  description String?
+  expenseDate DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([expenseDate])
+  @@map("expenses")
+}
+
+model Cashflow {
+  id          String   @id @default(uuid())
+  accountId   String
+  type        String
+  amount      Decimal
+  description String?
+  category    String?
+  date        DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([date])
+  @@map("cashflow")
+}
+
+// ============================================
+// ALERTS & NOTIFICATIONS
+// ============================================
+
+model Alert {
+  id          String   @id @default(uuid())
+  accountId   String?
+  type        String
+  severity    String   @default("info")
+  title       String
+  message     String
+  isRead      Boolean  @default(false)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([accountId])
+  @@index([isRead])
+  @@index([type])
+  @@map("alerts")
+}
+
+// ============================================
+// REIMBURSEMENTS
+// ============================================
+
+model Reimbursement {
+  id          String   @id @default(uuid())
+  accountId   String
+  orderId     String?
+  type        String
+  amount      Decimal
+  status      String   @default("pending")
+  description String?
+  requestDate DateTime @default(now())
+  processedDate DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([accountId])
+  @@index([status])
+  @@map("reimbursements")
+}
+
+// ============================================
+// REPORTS & ANALYTICS
+// ============================================
+
+model Report {
+  id          String   @id @default(uuid())
+  accountId   String?
+  userId      String?
+  type        String
+  name        String
+  parameters  Json?
+  data        Json?
+  status      String   @default("pending")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([accountId])
+  @@index([userId])
+  @@index([type])
+  @@map("reports")
+}
+
+// ============================================
+// AUDIT & LOGGING
+// ============================================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String
+  action      String
+  entity      String?
+  entityId    String?
+  changes     Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
