@@ -1,8 +1,36 @@
 import { Request, Response, NextFunction } from 'express'
 import { validationResult } from 'express-validator'
+import { env } from '../../config/env'
 import { AuthRequest } from '../../middlewares/auth.middleware'
 import { AppError } from '../../middlewares/error.middleware'
 import * as authService from './auth.service'
+const REFRESH_COOKIE_NAME = 'refreshToken'
+const REFRESH_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+
+const refreshCookieOptions = {
+  httpOnly: true,
+  sameSite: 'lax' as const,
+  secure: env.nodeEnv === 'production',
+  maxAge: REFRESH_MAX_AGE_MS,
+}
+
+function getRefreshTokenFromRequest(req: Request): string | undefined {
+  // Prefer cookie
+  const cookieHeader = req.headers.cookie
+  if (cookieHeader) {
+    const cookies = Object.fromEntries(
+      cookieHeader.split(';').map((c) => {
+        const [k, ...v] = c.trim().split('=')
+        return [k, decodeURIComponent(v.join('='))]
+      })
+    )
+    if (cookies[REFRESH_COOKIE_NAME]) return cookies[REFRESH_COOKIE_NAME]
+  }
+  // Fallback to body for backward compatibility
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const anyReq = req as any
+  return anyReq.body?.refreshToken
+}
 
 /**
  * Authentication controller
@@ -52,9 +80,13 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
     const { email, password } = req.body
     const result = await authService.login({ email, password })
 
+    // Set refresh token in HttpOnly cookie
+    res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, refreshCookieOptions)
+
     res.status(200).json({
       message: 'Login successful',
-      ...result,
+      user: result.user,
+      accessToken: result.accessToken,
     })
   } catch (error) {
     next(error)
@@ -73,10 +105,18 @@ export async function refreshToken(req: Request, res: Response, next: NextFuncti
       return
     }
 
-    const { refreshToken } = req.body
+    const refreshToken = getRefreshTokenFromRequest(req)
+    if (!refreshToken) {
+      res.status(401).json({ error: 'Refresh token not found' })
+      return
+    }
+
     const result = await authService.refreshToken(refreshToken)
 
-    res.status(200).json(result)
+    // Rotate refresh token in HttpOnly cookie
+    res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, refreshCookieOptions)
+
+    res.status(200).json({ accessToken: result.accessToken })
   } catch (error) {
     next(error)
   }
@@ -92,12 +132,19 @@ export async function logout(req: AuthRequest, res: Response, next: NextFunction
       throw new AppError('User not authenticated', 401)
     }
 
-    const { refreshToken } = req.body
+    const refreshToken = getRefreshTokenFromRequest(req)
     if (!refreshToken) {
       throw new AppError('Refresh token is required', 400)
     }
 
     const result = await authService.logout(refreshToken, req.userId)
+
+    // Clear refresh cookie
+    res.clearCookie(REFRESH_COOKIE_NAME, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: env.nodeEnv === 'production',
+    })
 
     res.status(200).json(result)
   } catch (error) {

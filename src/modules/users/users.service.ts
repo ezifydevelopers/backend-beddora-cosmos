@@ -34,8 +34,8 @@ export async function getCurrentUser(userId: string): Promise<UserProfileRespons
       email: true,
       name: true,
       isActive: true,
-      emailVerified: true,
-      emailVerifiedAt: true,
+      isVerified: true,
+      verifiedAt: true,
       twoFactorEnabled: true,
       createdAt: true,
       updatedAt: true,
@@ -90,7 +90,7 @@ export async function updateCurrentUser(userId: string, data: UpdateUserProfileD
   const updateData: {
     name?: string
     email?: string
-    emailVerified?: boolean
+    isVerified?: boolean
     emailToken?: null
     emailTokenExpires?: null
   } = {}
@@ -98,7 +98,7 @@ export async function updateCurrentUser(userId: string, data: UpdateUserProfileD
   if (data.name !== undefined) updateData.name = data.name
   if (data.email !== undefined) {
     updateData.email = data.email
-    updateData.emailVerified = false // Require re-verification
+    updateData.isVerified = false // Require re-verification
     updateData.emailToken = null
     updateData.emailTokenExpires = null
   }
@@ -111,7 +111,7 @@ export async function updateCurrentUser(userId: string, data: UpdateUserProfileD
       email: true,
       name: true,
       isActive: true,
-      emailVerified: true,
+      isVerified: true,
       updatedAt: true,
     },
   })

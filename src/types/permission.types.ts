@@ -10,6 +10,8 @@ export interface PermissionResponse {
   roles: string[]
 }
 
+export type ScopeType = 'GLOBAL' | 'MARKETPLACE' | 'PRODUCT'
+
 /**
  * Permission check data
  */
@@ -17,6 +19,9 @@ export interface PermissionCheckData {
   resource: string
   action: string
   accountId?: string
+  marketplaceId?: string
+  productId?: string
+  scope?: ScopeType
 }
 
 /**
@@ -25,5 +30,13 @@ export interface PermissionCheckData {
 export interface UpdateUserPermissionsData {
   resource: string
   action: string
+  accountId?: string
+  marketplaceId?: string
+  productId?: string
+  scope?: ScopeType
+}
+
+export interface RoleAssignment {
+  roleId: string
   accountId?: string
 }

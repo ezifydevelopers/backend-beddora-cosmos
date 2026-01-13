@@ -26,7 +26,7 @@ export interface UserProfileResponse {
   email: string
   name: string | null
   isActive: boolean
-  emailVerified: boolean
+  isVerified: boolean
   roles: string[]
   createdAt: Date
   updatedAt: Date

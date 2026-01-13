@@ -13,6 +13,8 @@ import {
   AuthResponse,
   RefreshTokenResponse,
 } from '../../types/auth.types'
+import { hashPassword } from './password.service'
+import { generateEmailVerificationToken } from './token.service'
 
 /**
  * Authentication service
@@ -103,7 +105,7 @@ function generateEmailToken(): string {
  * @param data - Registration data
  * @returns User object and success message
  */
-export async function register(data: RegisterData): Promise<{ user: { id: string; email: string; name: string | null; isActive: boolean; emailVerified: boolean; createdAt: Date }; message: string }> {
+export async function register(data: RegisterData): Promise<{ user: { id: string; email: string; name: string | null; isActive: boolean; isVerified: boolean; createdAt: Date }; message: string }> {
   // Validate terms acceptance
   if (!data.acceptTerms || !data.acceptPrivacy) {
     throw new AppError('You must accept Terms & Conditions and Privacy Policy', 400)
@@ -119,12 +121,10 @@ export async function register(data: RegisterData): Promise<{ user: { id: string
   }
 
   // Hash password
-  const hashedPassword = await bcrypt.hash(data.password, 12)
+  const hashedPassword = await hashPassword(data.password)
 
   // Generate email verification token
-  const emailToken = generateEmailToken()
-  const expiresAt = new Date()
-  expiresAt.setDate(expiresAt.getDate() + 7) // 7 days to verify
+  const { token: emailToken, expiresAt } = generateEmailVerificationToken()
 
   // Create user
   const user = await prisma.user.create({
@@ -132,14 +132,15 @@ export async function register(data: RegisterData): Promise<{ user: { id: string
       email: data.email,
       password: hashedPassword,
       name: data.name,
-      emailVerified: false,
+      isVerified: false,
+      termsAccepted: true,
     },
     select: {
       id: true,
       email: true,
       name: true,
       isActive: true,
-      emailVerified: true,
+      isVerified: true,
       createdAt: true,
     },
   })
@@ -150,11 +151,12 @@ export async function register(data: RegisterData): Promise<{ user: { id: string
       userId: user.id,
       token: emailToken,
       expiresAt,
+      used: false,
     },
   })
 
   // Assign default 'VIEWER' role
-  const viewerRole = await prisma.role.findUnique({ where: { name: 'VIEWER' } })
+  const viewerRole = await prisma.role.findUnique({ where: { name: 'viewer' } })
   if (viewerRole) {
     await prisma.userRole.create({
       data: {
@@ -224,7 +226,7 @@ export async function login(data: LoginData): Promise<AuthResponse> {
   }
 
   // Block login if email not verified
-  if (!user.emailVerified) {
+  if (!user.isVerified) {
     throw new AppError('Please verify your email before logging in', 403)
   }
 
@@ -266,7 +268,7 @@ export async function login(data: LoginData): Promise<AuthResponse> {
       id: user.id,
       email: user.email,
       name: user.name,
-      emailVerified: user.emailVerified,
+      isVerified: user.isVerified,
       roles: roleNames,
     },
     accessToken,
@@ -319,7 +321,7 @@ export async function refreshToken(refreshTokenString: string): Promise<RefreshT
   }
 
   // Check if user is still active
-  if (!tokenRecord.user.isActive || !tokenRecord.user.emailVerified) {
+  if (!tokenRecord.user.isActive || !tokenRecord.user.isVerified) {
     throw new AppError('User account is inactive or unverified', 403)
   }
 
@@ -392,7 +394,7 @@ export async function logout(refreshTokenString: string, userId: string) {
  * Business Logic:
  * - Validates verification token
  * - Checks token expiration (7 days)
- * - Updates user emailVerified status
+ * - Updates user isVerified status
  * - Marks verification record as used
  * 
  * @param token - Email verification token
@@ -408,8 +410,8 @@ export async function verifyEmail(token: string): Promise<{ message: string }> {
     throw new AppError('Invalid verification token', 400)
   }
 
-  if (verification.verified) {
-    throw new AppError('Email already verified', 400)
+  if (verification.used) {
+    throw new AppError('Verification token already used', 400)
   }
 
   if (verification.expiresAt < new Date()) {
@@ -421,15 +423,15 @@ export async function verifyEmail(token: string): Promise<{ message: string }> {
     prisma.user.update({
       where: { id: verification.userId },
       data: {
-        emailVerified: true,
-        emailVerifiedAt: new Date(),
+        isVerified: true,
+        verifiedAt: new Date(),
       },
     }),
     prisma.emailVerification.update({
       where: { id: verification.id },
       data: {
-        verified: true,
-        verifiedAt: new Date(),
+        used: true,
+        usedAt: new Date(),
       },
     }),
   ])
@@ -567,8 +569,8 @@ export async function getCurrentUser(userId: string) {
       email: true,
       name: true,
       isActive: true,
-      emailVerified: true,
-      emailVerifiedAt: true,
+      isVerified: true,
+      verifiedAt: true,
       twoFactorEnabled: true,
       createdAt: true,
       roles: {

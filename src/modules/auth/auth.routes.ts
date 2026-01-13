@@ -3,11 +3,11 @@ import * as authController from './auth.controller'
 import {
   registerValidation,
   loginValidation,
-  refreshTokenValidation,
   passwordResetRequestValidation,
   passwordResetValidation,
 } from './auth.validation'
 import { authenticate } from '../../middlewares/auth.middleware'
+import { rateLimitRegister, rateLimitLogin, rateLimitPassword } from '../../middlewares/rateLimiter'
 
 /**
  * Authentication routes
@@ -16,12 +16,12 @@ import { authenticate } from '../../middlewares/auth.middleware'
 
 const router = Router()
 
-// Public routes
-router.post('/register', registerValidation, authController.register)
-router.post('/login', loginValidation, authController.login)
-router.post('/refresh', refreshTokenValidation, authController.refreshToken)
-router.post('/forgot-password', passwordResetRequestValidation, authController.requestPasswordReset)
-router.post('/reset-password', passwordResetValidation, authController.resetPassword)
+// Public routes with rate limiting
+router.post('/register', rateLimitRegister, registerValidation, authController.register)
+router.post('/login', rateLimitLogin, loginValidation, authController.login)
+router.post('/refresh', authController.refreshToken) // uses HttpOnly cookie; no body required
+router.post('/forgot-password', rateLimitPassword, passwordResetRequestValidation, authController.requestPasswordReset)
+router.post('/reset-password', rateLimitPassword, passwordResetValidation, authController.resetPassword)
 router.get('/verify-email', authController.verifyEmail)
 
 // Protected routes

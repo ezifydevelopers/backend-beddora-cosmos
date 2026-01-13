@@ -4,6 +4,8 @@ import {
   PermissionResponse,
   PermissionCheckData,
   UpdateUserPermissionsData,
+  RoleAssignment,
+  ScopeType,
 } from '../../types/permission.types'
 
 /**
@@ -100,17 +102,22 @@ export async function getUserPermissions(userId: string, accountId?: string): Pr
  * @param accountId - Optional account ID for account-scoped checks
  * @returns True if user has permission, false otherwise
  */
-export async function hasPermission(
-  userId: string,
-  resource: string,
-  action: string,
+export async function hasPermission(data: {
+  userId: string
+  resource: string
+  action: string
   accountId?: string
-): Promise<boolean> {
+  marketplaceId?: string
+  productId?: string
+  scope?: ScopeType
+}): Promise<boolean> {
+  const { userId, resource, action, accountId, marketplaceId, productId, scope } = data
   // Get permission
   const permission = await prisma.permission.findFirst({
     where: {
       resource,
       action,
+      ...(scope ? { scope } : {}),
     },
   })
 
@@ -133,13 +140,15 @@ export async function hasPermission(
 
   // Check role-based permissions
   const userRoles = await prisma.userRole.findMany({
-    where: { userId },
+    where: { userId, ...(accountId ? { accountId } : {}) },
     include: {
       role: {
         include: {
           permissions: {
             where: {
               permissionId: permission.id,
+              ...(marketplaceId ? { marketplaceId } : {}),
+              ...(productId ? { productId } : {}),
             },
           },
         },
@@ -171,12 +180,27 @@ export async function hasPermission(
 export async function updateUserPermissions(
   adminUserId: string,
   targetUserId: string,
-  permissions: UpdateUserPermissionsData[]
+  permissions: UpdateUserPermissionsData[],
+  roles?: RoleAssignment[]
 ): Promise<{ message: string }> {
   // Verify admin has permission to manage permissions
-  const isAdmin = await hasPermission(adminUserId, 'permissions', 'write')
+  const isAdmin = await hasPermission({ userId: adminUserId, resource: 'permissions', action: 'write' })
   if (!isAdmin) {
     throw new AppError('Insufficient permissions', 403)
+  }
+
+  // Update roles if provided
+  if (roles) {
+    await prisma.userRole.deleteMany({ where: { userId: targetUserId } })
+    if (roles.length > 0) {
+      await prisma.userRole.createMany({
+        data: roles.map((r) => ({
+          userId: targetUserId,
+          roleId: r.roleId,
+          accountId: r.accountId || null,
+        })),
+      })
+    }
   }
 
   // Delete existing user permissions
@@ -190,6 +214,7 @@ export async function updateUserPermissions(
       where: {
         resource: perm.resource,
         action: perm.action,
+        ...(perm.scope ? { scope: perm.scope } : {}),
       },
     })
 
@@ -205,4 +230,35 @@ export async function updateUserPermissions(
   }
 
   return { message: 'Permissions updated successfully' }
+}
+
+export async function listRoles() {
+  return prisma.role.findMany({
+    orderBy: { name: 'asc' },
+    include: { permissions: { include: { permission: true } } },
+  })
+}
+
+export async function createRole(name: string, description?: string) {
+  return prisma.role.create({
+    data: { name, description },
+  })
+}
+
+export async function createPermission(data: {
+  name: string
+  resource: string
+  action: string
+  scope?: ScopeType
+  description?: string
+}) {
+  return prisma.permission.create({
+    data: {
+      name: data.name,
+      resource: data.resource,
+      action: data.action,
+      scope: data.scope || 'GLOBAL',
+      description: data.description,
+    },
+  })
 }

@@ -13,18 +13,20 @@ export const registerValidation = [
   body('password')
     .isLength({ min: 8 })
     .withMessage('Password must be at least 8 characters long')
-    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
-    .withMessage('Password must contain at least one uppercase letter, one lowercase letter, and one number'),
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/)
+    .withMessage('Password must contain uppercase, lowercase, number, and special character'),
   body('name')
     .optional()
     .trim()
     .isLength({ min: 2, max: 100 })
     .withMessage('Name must be between 2 and 100 characters'),
   body('acceptTerms')
-    .equals('true')
+    .isBoolean()
+    .custom((value) => value === true)
     .withMessage('You must accept the Terms & Conditions'),
   body('acceptPrivacy')
-    .equals('true')
+    .isBoolean()
+    .custom((value) => value === true)
     .withMessage('You must accept the Privacy Policy'),
 ]
 

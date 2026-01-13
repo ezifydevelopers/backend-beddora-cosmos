@@ -2,6 +2,7 @@ import express, { Express } from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import morgan from 'morgan'
+import cookieParser from 'cookie-parser'
 import { env } from './config/env'
 import { logger } from './config/logger'
 import { errorHandler } from './middlewares/error.middleware'
@@ -24,6 +25,9 @@ export function createApp(): Express {
       credentials: true,
     })
   )
+
+  // Parse cookies for auth/refresh workflows
+  app.use(cookieParser())
 
   // Body parsing middleware
   app.use(express.json({ limit: '10mb' }))

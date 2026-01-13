@@ -41,7 +41,7 @@ export interface AuthResponse {
     id: string
     email: string
     name: string | null
-    emailVerified: boolean
+    isVerified: boolean
     roles: string[]
   }
   accessToken: string
