@@ -113,8 +113,11 @@ export async function refreshToken(req: Request, res: Response, next: NextFuncti
 
     const result = await authService.refreshToken(refreshToken)
 
-    // Rotate refresh token in HttpOnly cookie
-    res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, refreshCookieOptions)
+    // Only set new refresh token cookie if token rotation is enabled (service returns refreshToken)
+    // Otherwise, keep existing refresh token cookie
+    if (result.refreshToken) {
+      res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, refreshCookieOptions)
+    }
 
     res.status(200).json({ accessToken: result.accessToken })
   } catch (error) {

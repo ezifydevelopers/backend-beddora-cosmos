@@ -557,13 +557,6 @@ export async function resetPassword(token: string, newPassword: string): Promise
 export async function getCurrentUser(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: {
-      roles: {
-        include: {
-          role: true,
-        },
-      },
-    },
     select: {
       id: true,
       email: true,

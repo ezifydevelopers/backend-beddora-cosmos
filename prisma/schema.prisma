@@ -36,6 +36,13 @@ model User {
   emailVerifications EmailVerification[]
   passwordResets PasswordReset[]
   auditLogs     AuditLog[]
+  amazonAccounts AmazonAccount[]
+  syncLogs       SyncLog[]
+  orderImports   OrderImportStaging[]
+  ppcImports     PPCImportStaging[]
+  inventoryImports InventoryImportStaging[]
+  listingImports ListingImportStaging[]
+  refundImports  RefundImportStaging[]
 
   @@index([email])
   @@map("users")
@@ -211,6 +218,7 @@ model Account {
   ppcCampaigns PPC_Campaign[]
   expenses    Expense[]
   cashflow    Cashflow[]
+  cogs        COGS[]
 
   @@index([sellerId])
   @@map("accounts")
@@ -221,6 +229,7 @@ model Marketplace {
   name        String   @unique
   code        String   @unique // 'amazon', 'ebay', etc.
   region      String?
+  baseCurrency String? // e.g., 'USD', 'EUR', 'GBP'
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -228,6 +237,8 @@ model Marketplace {
   // Relations
   accountMarketplaces AccountMarketplace[]
   rolePermissions RolePermission[]
+  orders Order[] @relation("MarketplaceOrders")
+  expenses Expense[] @relation("MarketplaceExpenses")
 
   @@map("marketplaces")
 }
@@ -381,6 +392,7 @@ model PurchaseOrderItem {
 model Order {
   id              String   @id @default(uuid())
   accountId       String
+  marketplaceId   String?  // Links to Marketplace for profit breakdown
   orderId         String   @unique
   orderDate       DateTime
   shipDate        DateTime?
@@ -389,18 +401,22 @@ model Order {
   shippingCost    Decimal  @default(0)
   tax             Decimal  @default(0)
   currency        String   @default("USD")
-  marketplace     String?
+  marketplace     String?  // Legacy field, kept for backward compatibility
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   // Relations
   account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplaceRef  Marketplace? @relation("MarketplaceOrders", fields: [marketplaceId], references: [id], onDelete: SetNull)
   items           OrderItem[]
   fees            Fee[]
   refunds         Refund[]
 
   @@index([accountId])
   @@index([orderId])
+  @@index([marketplaceId])
+  @@index([orderDate])
+  @@index([accountId, orderDate])
   @@map("orders")
 }
 
@@ -420,21 +436,27 @@ model OrderItem {
 
   @@index([orderId])
   @@index([productId])
+  @@index([sku])
+  @@index([sku, createdAt])
   @@map("order_items")
 }
 
 model Fee {
   id          String   @id @default(uuid())
   orderId     String
-  feeType     String
+  feeType     String   // 'FBA', 'Referral', 'Shipping', etc.
   amount      Decimal
   description String?
+  timestamp   DateTime @default(now()) // For FBA fees aggregation by period
   createdAt   DateTime @default(now())
 
   // Relations
   order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
+  @@index([feeType])
+  @@index([timestamp])
+  @@index([feeType, timestamp])
   @@map("fees")
 }
 
@@ -444,8 +466,10 @@ model Refund {
   refundId    String   @unique
   amount      Decimal
   reason      String?
+  reasonCode  String?  // Added per requirements
   status      String   @default("pending")
   refundDate DateTime @default(now())
+  processedAt DateTime? // Added per requirements
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -453,6 +477,7 @@ model Refund {
   order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
+  @@index([createdAt])
   @@map("refunds")
 }
 
@@ -492,20 +517,26 @@ model PPC_Campaign {
 // ============================================
 
 model Expense {
-  id          String   @id @default(uuid())
-  accountId   String
-  category    String
-  amount      Decimal
-  description String?
-  expenseDate DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(uuid())
+  accountId     String
+  marketplaceId String?  // Links to Marketplace for profit breakdown
+  type          String   // 'fixed', 'recurring', 'one-time'
+  category      String
+  amount        Decimal
+  description   String?
+  expenseDate   DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   // Relations
-  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace   Marketplace? @relation("MarketplaceExpenses", fields: [marketplaceId], references: [id], onDelete: SetNull)
 
   @@index([accountId])
+  @@index([marketplaceId])
   @@index([expenseDate])
+  @@index([accountId, expenseDate])
+  @@index([type])
   @@map("expenses")
 }
 
@@ -526,6 +557,31 @@ model Cashflow {
   @@index([accountId])
   @@index([date])
   @@map("cashflow")
+}
+
+// ============================================
+// COST OF GOODS SOLD (COGS)
+// ============================================
+
+model COGS {
+  id          String   @id @default(uuid())
+  accountId   String
+  sku         String
+  cost        Decimal  // Cost per unit
+  quantity    Int      // Quantity purchased at this cost
+  purchaseDate DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([sku])
+  @@index([accountId, sku])
+  @@index([purchaseDate])
+  @@index([accountId, sku, purchaseDate])
+  @@map("cogs")
 }
 
 // ============================================
@@ -616,4 +672,294 @@ model AuditLog {
   @@index([entity, entityId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+model SyncLog {
+  id              String   @id @default(uuid())
+  userId          String
+  amazonAccountId String
+  syncType        String   // 'orders', 'fees', 'ppc', 'inventory', 'listings', 'refunds'
+  status          String   // 'success', 'failed', 'partial'
+  recordsSynced   Int      @default(0)
+  recordsFailed   Int      @default(0)
+  errorMessage    String?
+  metadata        Json?    // Additional sync details
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+
+  // Relations
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amazonAccount   AmazonAccount @relation(fields: [amazonAccountId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([amazonAccountId])
+  @@index([syncType])
+  @@index([startedAt])
+  @@map("sync_logs")
+}
+
+// ============================================
+// AMAZON ACCOUNTS (Linked Seller Central)
+// ============================================
+
+model AmazonAccount {
+  id           String   @id @default(uuid())
+  userId       String
+  marketplace  String   // e.g. "US", "DE", "JP"
+  sellerId     String
+  accessKey    String   // Encrypted
+  secretKey    String   // Encrypted
+  refreshToken String   // Encrypted
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders       AmazonOrder[]
+  ppcMetrics   PPCMetric[]
+  inventory    AmazonInventory[]
+  listingChanges ListingChange[]
+  refunds      AmazonRefund[]
+  syncLogs     SyncLog[]
+  orderImports OrderImportStaging[]
+  ppcImports   PPCImportStaging[]
+  inventoryImports InventoryImportStaging[]
+  listingImports ListingImportStaging[]
+  refundImports RefundImportStaging[]
+
+  @@unique([userId, marketplace]) // Ensure unique linkage per user/marketplace combination
+  @@index([userId])
+  @@index([marketplace])
+  @@map("amazon_accounts")
+}
+
+model AmazonOrder {
+  id            String   @id @default(uuid())
+  orderId       String   @unique
+  marketplaceId String
+  accountId     String   // Links to AmazonAccount.id or internal Account.id? Requirement says "Relationships: User -> AmazonAccount"
+  // Requirement: "AmazonOrder model: orderId, marketplaceId, accountId, status, totalAmount, fees (json)"
+  // I will link to AmazonAccount for credentials linkage + internal Account for business logic if needed. 
+  // Requirement says "Relationships: User -> AmazonAccount -> Marketplace -> Orders" implying AmazonOrder links to AmazonAccount.
+  amazonAccountId String
+  
+  status        String
+  totalAmount   Decimal  @default(0)
+  fees          Json?    // Stores broken down fees
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  amazonAccount AmazonAccount @relation(fields: [amazonAccountId], references: [id], onDelete: Cascade)
+
+  @@index([amazonAccountId])
+  @@index([orderId])
+  @@map("amazon_orders")
+}
+
+model PPCMetric {
+  id            String   @id @default(uuid())
+  campaignId    String
+  adGroupId     String?
+  keywordId     String?
+  
+  clicks        Int      @default(0)
+  spend         Decimal  @default(0)
+  sales         Decimal  @default(0)
+  acos          Decimal? 
+  
+  amazonAccountId String // Linked to AmazonAccount
+  marketplaceId   String
+  date          DateTime
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  amazonAccount AmazonAccount @relation(fields: [amazonAccountId], references: [id], onDelete: Cascade)
+
+  @@index([amazonAccountId])
+  @@index([campaignId])
+  @@index([adGroupId])
+  @@index([keywordId])
+  @@index([date])
+  @@index([amazonAccountId, date])
+  @@map("ppc_metrics")
+}
+
+model AmazonInventory {
+  id            String   @id @default(uuid())
+  sku           String
+  marketplaceId String
+  amazonAccountId String
+  
+  stockLevel    Int      @default(0)
+  inboundQty    Int      @default(0)
+  
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  amazonAccount AmazonAccount @relation(fields: [amazonAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([amazonAccountId, sku, marketplaceId])
+  @@map("amazon_inventory")
+}
+
+model ListingChange {
+  id            String   @id @default(uuid())
+  sku           String
+  marketplaceId String
+  amazonAccountId String
+  
+  changes       Json     // Details of what changed (price, buybox, title)
+  detectedAt    DateTime @default(now())
+
+  // Relations
+  amazonAccount AmazonAccount @relation(fields: [amazonAccountId], references: [id], onDelete: Cascade)
+
+  @@index([amazonAccountId])
+  @@index([sku])
+  @@map("listing_changes")
+}
+
+model AmazonRefund {
+  id            String   @id @default(uuid())
+  orderId       String   // Amazon order ID
+  refundId      String   @unique
+  amount        Decimal  @default(0)
+  reasonCode    String?
+  accountId     String   // Links to AmazonAccount
+  marketplaceId String
+  processedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  amazonAccount AmazonAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([orderId])
+  @@index([marketplaceId])
+  @@map("amazon_refunds")
+}
+
+// ============================================
+// MANUAL DATA IMPORT STAGING TABLES
+// ============================================
+
+model OrderImportStaging {
+  id            String   @id @default(uuid())
+  userId        String
+  amazonAccountId String
+  marketplaceId String
+  rawData       Json     // Parsed CSV/Excel row data
+  validated     Boolean  @default(false)
+  errorMessages Json?    // Array of validation errors
+  status        String   @default("pending") // pending, approved, rejected, finalized
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amazonAccount AmazonAccount @relation(fields: [amazonAccountId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([amazonAccountId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("order_import_staging")
+}
+
+model PPCImportStaging {
+  id            String   @id @default(uuid())
+  userId        String
+  amazonAccountId String
+  marketplaceId String
+  rawData       Json
+  validated     Boolean  @default(false)
+  errorMessages Json?
+  status        String   @default("pending")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amazonAccount AmazonAccount @relation(fields: [amazonAccountId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([amazonAccountId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("ppc_import_staging")
+}
+
+model InventoryImportStaging {
+  id            String   @id @default(uuid())
+  userId        String
+  amazonAccountId String
+  marketplaceId String
+  rawData       Json
+  validated     Boolean  @default(false)
+  errorMessages Json?
+  status        String   @default("pending")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amazonAccount AmazonAccount @relation(fields: [amazonAccountId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([amazonAccountId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("inventory_import_staging")
+}
+
+model ListingImportStaging {
+  id            String   @id @default(uuid())
+  userId        String
+  amazonAccountId String
+  marketplaceId String
+  rawData       Json
+  validated     Boolean  @default(false)
+  errorMessages Json?
+  status        String   @default("pending")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amazonAccount AmazonAccount @relation(fields: [amazonAccountId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([amazonAccountId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("listing_import_staging")
+}
+
+model RefundImportStaging {
+  id            String   @id @default(uuid())
+  userId        String
+  amazonAccountId String
+  marketplaceId String
+  rawData       Json
+  validated     Boolean  @default(false)
+  errorMessages Json?
+  status        String   @default("pending")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amazonAccount AmazonAccount @relation(fields: [amazonAccountId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([amazonAccountId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("refund_import_staging")
 }

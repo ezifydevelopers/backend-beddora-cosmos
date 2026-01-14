@@ -1,155 +1,21 @@
 import { Response, NextFunction } from 'express'
-import { AuthRequest } from '../../middlewares/auth.middleware'
-import * as profitService from './profit.service'
-import { ProfitFilters } from '../../types/profit.types'
-import { logger } from '../../config/logger'
+import { AuthRequest } from '../../../middlewares/auth.middleware'
+import * as kpisService from './kpis.service'
+import { KPIFilters } from '../../../types/kpis.types'
+import { logger } from '../../../config/logger'
 
 /**
- * Profit Controller
+ * KPIs Controller
  * 
- * Handles HTTP requests and responses for profit calculations
- * Delegates business logic to profit.service
+ * Handles HTTP requests and responses for KPI calculations
+ * Delegates business logic to kpis.service
  * 
  * All endpoints require authentication and profit.read permission
  */
 
 /**
- * GET /profit/summary
- * Get aggregated profit summary metrics
- * 
- * Query Parameters:
- * - accountId: Filter by account ID
- * - amazonAccountId: Filter by Amazon account ID
- * - marketplaceId: Filter by marketplace ID
- * - sku: Filter by SKU
- * - startDate: Start date (ISO format)
- * - endDate: End date (ISO format)
- * 
- * Returns: ProfitSummary with aggregated metrics
- */
-export async function getProfitSummary(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
-  try {
-    if (!req.userId) {
-      res.status(401).json({ error: 'Unauthorized' })
-      return
-    }
-
-    const filters: ProfitFilters = {
-      accountId: req.query.accountId as string | undefined,
-      amazonAccountId: req.query.amazonAccountId as string | undefined,
-      marketplaceId: req.query.marketplaceId as string | undefined,
-      sku: req.query.sku as string | undefined,
-      startDate: req.query.startDate as string | undefined,
-      endDate: req.query.endDate as string | undefined,
-    }
-
-    const result = await profitService.getProfitSummary(filters, req.userId)
-
-    res.status(200).json({
-      success: true,
-      data: result,
-    })
-  } catch (error: any) {
-    logger.error('Failed to get profit summary', { error, userId: req.userId })
-    next(error)
-  }
-}
-
-/**
- * GET /profit/by-product
- * Get profit breakdown by product/SKU
- * 
- * Query Parameters:
- * - accountId: Filter by account ID
- * - amazonAccountId: Filter by Amazon account ID
- * - marketplaceId: Filter by marketplace ID
- * - startDate: Start date (ISO format)
- * - endDate: End date (ISO format)
- * 
- * Returns: Array of ProductProfitBreakdown
- */
-export async function getProfitByProduct(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
-  try {
-    if (!req.userId) {
-      res.status(401).json({ error: 'Unauthorized' })
-      return
-    }
-
-    const filters: ProfitFilters = {
-      accountId: req.query.accountId as string | undefined,
-      amazonAccountId: req.query.amazonAccountId as string | undefined,
-      marketplaceId: req.query.marketplaceId as string | undefined,
-      startDate: req.query.startDate as string | undefined,
-      endDate: req.query.endDate as string | undefined,
-    }
-
-    const result = await profitService.getProfitByProduct(filters, req.userId)
-
-    res.status(200).json({
-      success: true,
-      data: result,
-      totalRecords: result.length,
-    })
-  } catch (error: any) {
-    logger.error('Failed to get profit by product', { error, userId: req.userId })
-    next(error)
-  }
-}
-
-/**
- * GET /profit/by-marketplace
- * Get profit breakdown by marketplace
- * 
- * Query Parameters:
- * - accountId: Filter by account ID
- * - amazonAccountId: Filter by Amazon account ID
- * - startDate: Start date (ISO format)
- * - endDate: End date (ISO format)
- * 
- * Returns: Array of MarketplaceProfitBreakdown
- */
-export async function getProfitByMarketplace(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
-  try {
-    if (!req.userId) {
-      res.status(401).json({ error: 'Unauthorized' })
-      return
-    }
-
-    const filters: ProfitFilters = {
-      accountId: req.query.accountId as string | undefined,
-      amazonAccountId: req.query.amazonAccountId as string | undefined,
-      startDate: req.query.startDate as string | undefined,
-      endDate: req.query.endDate as string | undefined,
-    }
-
-    const result = await profitService.getProfitByMarketplace(filters, req.userId)
-
-    res.status(200).json({
-      success: true,
-      data: result,
-      totalRecords: result.length,
-    })
-  } catch (error: any) {
-    logger.error('Failed to get profit by marketplace', { error, userId: req.userId })
-    next(error)
-  }
-}
-
-/**
- * GET /profit/trends
- * Get profit trends over time for chart visualization
+ * GET /profit/kpis/units-sold
+ * Get units sold KPI
  * 
  * Query Parameters:
  * - accountId: Filter by account ID
@@ -160,9 +26,9 @@ export async function getProfitByMarketplace(
  * - endDate: End date (ISO format)
  * - period: Grouping period ('day', 'week', 'month')
  * 
- * Returns: ProfitTrendsResponse with time-series data
+ * Returns: UnitsSoldKPI with aggregated units sold
  */
-export async function getProfitTrends(
+export async function getUnitsSoldKPI(
   req: AuthRequest,
   res: Response,
   next: NextFunction
@@ -173,7 +39,7 @@ export async function getProfitTrends(
       return
     }
 
-    const filters: ProfitFilters = {
+    const filters: KPIFilters = {
       accountId: req.query.accountId as string | undefined,
       amazonAccountId: req.query.amazonAccountId as string | undefined,
       marketplaceId: req.query.marketplaceId as string | undefined,
@@ -183,28 +49,197 @@ export async function getProfitTrends(
       period: (req.query.period as 'day' | 'week' | 'month') || 'day',
     }
 
-    const result = await profitService.getProfitTrends(filters, req.userId)
+    const result = await kpisService.getUnitsSoldKPI(filters, req.userId)
 
     res.status(200).json({
       success: true,
       data: result,
     })
   } catch (error: any) {
-    logger.error('Failed to get profit trends', { error, userId: req.userId })
+    logger.error('Failed to get units sold KPI', { error, userId: req.userId })
     next(error)
   }
 }
 
 /**
- * GET /profit/report
- * Legacy endpoint - redirects to summary
- * Kept for backward compatibility
+ * GET /profit/kpis/returns-cost
+ * Get returns cost KPI
+ * 
+ * Query Parameters:
+ * - accountId: Filter by account ID
+ * - amazonAccountId: Filter by Amazon account ID
+ * - marketplaceId: Filter by marketplace ID
+ * - sku: Filter by SKU
+ * - startDate: Start date (ISO format)
+ * - endDate: End date (ISO format)
+ * 
+ * Returns: ReturnsCostKPI with returns breakdown
  */
-export async function getProfitReport(
+export async function getReturnsCostKPI(
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  // Redirect to summary endpoint
-  return getProfitSummary(req, res, next)
+  try {
+    if (!req.userId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const filters: KPIFilters = {
+      accountId: req.query.accountId as string | undefined,
+      amazonAccountId: req.query.amazonAccountId as string | undefined,
+      marketplaceId: req.query.marketplaceId as string | undefined,
+      sku: req.query.sku as string | undefined,
+      startDate: req.query.startDate as string | undefined,
+      endDate: req.query.endDate as string | undefined,
+    }
+
+    const result = await kpisService.getReturnsCostKPI(filters, req.userId)
+
+    res.status(200).json({
+      success: true,
+      data: result,
+    })
+  } catch (error: any) {
+    logger.error('Failed to get returns cost KPI', { error, userId: req.userId })
+    next(error)
+  }
 }
+
+/**
+ * GET /profit/kpis/advertising-cost
+ * Get advertising cost (PPC) KPI
+ * 
+ * Query Parameters:
+ * - accountId: Filter by account ID
+ * - amazonAccountId: Filter by Amazon account ID
+ * - campaignId: Filter by campaign ID
+ * - adGroupId: Filter by ad group ID
+ * - keywordId: Filter by keyword ID
+ * - startDate: Start date (ISO format)
+ * - endDate: End date (ISO format)
+ * 
+ * Returns: AdvertisingCostKPI with PPC breakdown
+ */
+export async function getAdvertisingCostKPI(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.userId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const filters: KPIFilters = {
+      accountId: req.query.accountId as string | undefined,
+      amazonAccountId: req.query.amazonAccountId as string | undefined,
+      campaignId: req.query.campaignId as string | undefined,
+      adGroupId: req.query.adGroupId as string | undefined,
+      keywordId: req.query.keywordId as string | undefined,
+      startDate: req.query.startDate as string | undefined,
+      endDate: req.query.endDate as string | undefined,
+    }
+
+    const result = await kpisService.getAdvertisingCostKPI(filters, req.userId)
+
+    res.status(200).json({
+      success: true,
+      data: result,
+    })
+  } catch (error: any) {
+    logger.error('Failed to get advertising cost KPI', { error, userId: req.userId })
+    next(error)
+  }
+}
+
+/**
+ * GET /profit/kpis/fba-fees
+ * Get FBA fees KPI
+ * 
+ * Query Parameters:
+ * - accountId: Filter by account ID
+ * - amazonAccountId: Filter by Amazon account ID
+ * - startDate: Start date (ISO format)
+ * - endDate: End date (ISO format)
+ * - period: Grouping period ('hour', 'day', 'week', 'month')
+ * 
+ * Returns: FBAFeesKPI with FBA fees breakdown
+ */
+export async function getFBAFeesKPI(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.userId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const filters: KPIFilters = {
+      accountId: req.query.accountId as string | undefined,
+      amazonAccountId: req.query.amazonAccountId as string | undefined,
+      startDate: req.query.startDate as string | undefined,
+      endDate: req.query.endDate as string | undefined,
+      period: (req.query.period as 'hour' | 'day' | 'week' | 'month') || 'day',
+    }
+
+    const result = await kpisService.getFBAFeesKPI(filters, req.userId)
+
+    res.status(200).json({
+      success: true,
+      data: result,
+    })
+  } catch (error: any) {
+    logger.error('Failed to get FBA fees KPI', { error, userId: req.userId })
+    next(error)
+  }
+}
+
+/**
+ * GET /profit/kpis/payout-estimate
+ * Get payout estimate KPI
+ * 
+ * Query Parameters:
+ * - accountId: Filter by account ID
+ * - amazonAccountId: Filter by Amazon account ID
+ * - marketplaceId: Filter by marketplace ID
+ * - startDate: Start date (ISO format)
+ * - endDate: End date (ISO format)
+ * 
+ * Returns: PayoutEstimateKPI with estimated payout breakdown
+ */
+export async function getPayoutEstimateKPI(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.userId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const filters: KPIFilters = {
+      accountId: req.query.accountId as string | undefined,
+      amazonAccountId: req.query.amazonAccountId as string | undefined,
+      marketplaceId: req.query.marketplaceId as string | undefined,
+      startDate: req.query.startDate as string | undefined,
+      endDate: req.query.endDate as string | undefined,
+    }
+
+    const result = await kpisService.getPayoutEstimateKPI(filters, req.userId)
+
+    res.status(200).json({
+      success: true,
+      data: result,
+    })
+  } catch (error: any) {
+    logger.error('Failed to get payout estimate KPI', { error, userId: req.userId })
+    next(error)
+  }
+}
+

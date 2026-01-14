@@ -168,3 +168,44 @@ export async function changePassword(
 
   return { message: 'Password changed successfully' }
 }
+
+/**
+ * List all users (admin only)
+ * 
+ * Business Logic:
+ * - Returns all users with their roles
+ * - Used for admin user management
+ * - Includes user status (active, verified)
+ * 
+ * @returns Array of users with roles
+ */
+export async function listUsers() {
+  const users = await prisma.user.findMany({
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      isActive: true,
+      isVerified: true,
+      verifiedAt: true,
+      createdAt: true,
+      roles: {
+        select: {
+          role: {
+            select: {
+              id: true,
+              name: true,
+              description: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  })
+
+  return users.map((user) => ({
+    ...user,
+    roles: user.roles.map((ur) => ur.role),
+  }))
+}

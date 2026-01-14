@@ -1,58 +1,30 @@
 import { Router } from 'express'
 import { authenticate } from '../../middlewares/auth.middleware'
-import * as syncService from './sync.service'
-import * as webhookHandlers from './webhooks'
+import { validate } from '../../middlewares/validation.middleware'
+import * as amazonController from './amazon.controller'
+import { syncRequestSchema } from './amazon.validation'
 
 /**
- * Amazon SP API routes
+ * Amazon routes
+ * 
+ * All routes require authentication
+ * Routes for syncing data from Amazon Selling Partner API
  */
 
 const router = Router()
 
-// Sync routes (protected)
-router.post('/sync/orders/:accountId', authenticate, async (req, res, next) => {
-  try {
-    const { accountId } = req.params
-    const result = await syncService.syncOrders(accountId)
-    res.status(200).json(result)
-  } catch (error) {
-    next(error)
-  }
-})
+// Apply authentication to all routes
+router.use(authenticate)
 
-router.post('/sync/products/:accountId', authenticate, async (req, res, next) => {
-  try {
-    const { accountId } = req.params
-    const result = await syncService.syncProducts(accountId)
-    res.status(200).json(result)
-  } catch (error) {
-    next(error)
-  }
-})
+// Sync endpoints
+router.post('/sync-orders', validate(syncRequestSchema), amazonController.syncOrders)
+router.post('/sync-fees', validate(syncRequestSchema), amazonController.syncFees)
+router.post('/sync-ppc', validate(syncRequestSchema), amazonController.syncPPC)
+router.post('/sync-inventory', validate(syncRequestSchema), amazonController.syncInventory)
+router.post('/sync-listings', validate(syncRequestSchema), amazonController.syncListings)
+router.post('/sync-refunds', validate(syncRequestSchema), amazonController.syncRefunds)
 
-router.post('/sync/inventory/:accountId', authenticate, async (req, res, next) => {
-  try {
-    const { accountId } = req.params
-    const result = await syncService.syncInventory(accountId)
-    res.status(200).json(result)
-  } catch (error) {
-    next(error)
-  }
-})
-
-router.post('/sync/ppc/:accountId', authenticate, async (req, res, next) => {
-  try {
-    const { accountId } = req.params
-    const result = await syncService.syncPPCCampaigns(accountId)
-    res.status(200).json(result)
-  } catch (error) {
-    next(error)
-  }
-})
-
-// Webhook routes (public, but should verify signature)
-router.post('/webhooks/orders', webhookHandlers.handleOrderNotification)
-router.post('/webhooks/inventory', webhookHandlers.handleInventoryNotification)
+// Sync logs endpoint
+router.get('/sync-logs', amazonController.getSyncLogs)
 
 export default router
-

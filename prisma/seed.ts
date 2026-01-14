@@ -75,61 +75,43 @@ async function main() {
 
   console.log('✅ Permissions created')
 
-  // Assign permissions to roles
+  // Assign permissions to roles using createMany with skipDuplicates
   // ADMIN: All permissions
-  for (const permission of createdPermissions) {
-    await prisma.rolePermission.upsert({
-      where: {
-        roleId_permissionId: {
-          roleId: adminRole.id,
-          permissionId: permission.id,
-        },
-      },
-      update: {},
-      create: {
-        roleId: adminRole.id,
-        permissionId: permission.id,
-      },
-    })
-  }
+  await prisma.rolePermission.createMany({
+    data: createdPermissions.map((permission) => ({
+      roleId: adminRole.id,
+      permissionId: permission.id,
+      marketplaceId: null,
+      productId: null,
+    })),
+    skipDuplicates: true,
+  })
 
-  // MANAGER: Read and write (no delete)
+  // MANAGER: Read and write (no delete, except permissions delete allowed)
   const managerPermissions = createdPermissions.filter(
     (p) => p.action !== 'delete' || p.resource === 'permissions'
   )
-  for (const permission of managerPermissions) {
-    await prisma.rolePermission.upsert({
-      where: {
-        roleId_permissionId: {
-          roleId: managerRole.id,
-          permissionId: permission.id,
-        },
-      },
-      update: {},
-      create: {
-        roleId: managerRole.id,
-        permissionId: permission.id,
-      },
-    })
-  }
+  await prisma.rolePermission.createMany({
+    data: managerPermissions.map((permission) => ({
+      roleId: managerRole.id,
+      permissionId: permission.id,
+      marketplaceId: null,
+      productId: null,
+    })),
+    skipDuplicates: true,
+  })
 
   // VIEWER: Read only
   const viewerPermissions = createdPermissions.filter((p) => p.action === 'read')
-  for (const permission of viewerPermissions) {
-    await prisma.rolePermission.upsert({
-      where: {
-        roleId_permissionId: {
-          roleId: viewerRole.id,
-          permissionId: permission.id,
-        },
-      },
-      update: {},
-      create: {
-        roleId: viewerRole.id,
-        permissionId: permission.id,
-      },
-    })
-  }
+  await prisma.rolePermission.createMany({
+    data: viewerPermissions.map((permission) => ({
+      roleId: viewerRole.id,
+      permissionId: permission.id,
+      marketplaceId: null,
+      productId: null,
+    })),
+    skipDuplicates: true,
+  })
 
   console.log('✅ Role permissions assigned')
 

@@ -66,3 +66,32 @@ export async function createPermission(req: AuthRequest, res: Response, next: Ne
     next(error)
   }
 }
+
+export async function getUserPermissions(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.userId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const { userId } = req.params
+    const accountId = req.query.accountId as string | undefined
+    
+    // Verify admin has permission to view permissions
+    const hasPermission = await permissionsService.hasPermission({
+      userId: req.userId,
+      resource: 'permissions',
+      action: 'read',
+    })
+    
+    if (!hasPermission) {
+      res.status(403).json({ error: 'Insufficient permissions' })
+      return
+    }
+    
+    const result = await permissionsService.getUserPermissions(userId, accountId)
+    res.status(200).json(result)
+  } catch (error) {
+    next(error)
+  }
+}

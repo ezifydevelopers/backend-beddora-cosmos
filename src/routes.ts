@@ -17,6 +17,7 @@ import reimbursementsRoutes from './modules/reimbursements/reimbursements.routes
 import reportsRoutes from './modules/reports/reports.routes'
 import adminRoutes from './modules/admin/admin.routes'
 import amazonRoutes from './modules/amazon/amazon.routes'
+import manualImportRoutes from './modules/manual-import/import.routes'
 
 /**
  * Central route registration
@@ -77,6 +78,9 @@ export function registerRoutes(): Router {
 
   // Amazon SP API routes
   router.use('/amazon', amazonRoutes)
+
+  // Manual import routes
+  router.use('/import', manualImportRoutes)
 
   return router
 }

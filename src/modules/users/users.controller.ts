@@ -49,3 +49,17 @@ export async function changePassword(req: AuthRequest, res: Response, next: Next
     next(error)
   }
 }
+
+export async function listUsers(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.userId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const result = await usersService.listUsers()
+    res.status(200).json(result)
+  } catch (error) {
+    next(error)
+  }
+}
