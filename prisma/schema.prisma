@@ -219,6 +219,7 @@ model Account {
   expenses    Expense[]
   cashflow    Cashflow[]
   cogs        COGS[]
+  cogsBatches Batch[]
 
   @@index([sellerId])
   @@map("accounts")
@@ -239,6 +240,7 @@ model Marketplace {
   rolePermissions RolePermission[]
   orders Order[] @relation("MarketplaceOrders")
   expenses Expense[] @relation("MarketplaceExpenses")
+  cogs COGS[]
 
   @@map("marketplaces")
 }
@@ -563,25 +565,55 @@ model Cashflow {
 // COST OF GOODS SOLD (COGS)
 // ============================================
 
+enum CostMethod {
+  BATCH
+  TIME_PERIOD
+  WEIGHTED_AVERAGE
+}
+
 model COGS {
   id          String   @id @default(uuid())
   accountId   String
   sku         String
-  cost        Decimal  // Cost per unit
-  quantity    Int      // Quantity purchased at this cost
-  purchaseDate DateTime @default(now())
+  marketplaceId String
+  batchId     String?
+  quantity    Int
+  unitCost    Decimal
+  totalCost   Decimal
+  costMethod  CostMethod
+  shipmentCost Decimal?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   // Relations
   account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace Marketplace @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+  batch       Batch?   @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
-  @@index([accountId])
-  @@index([sku])
-  @@index([accountId, sku])
-  @@index([purchaseDate])
-  @@index([accountId, sku, purchaseDate])
+  @@index([sku, accountId, marketplaceId])
+  @@index([accountId, createdAt])
+  @@index([batchId])
   @@map("cogs")
+}
+
+model Batch {
+  id          String   @id @default(uuid())
+  sku         String
+  accountId   String
+  quantity    Int
+  unitCost    Decimal
+  totalCost   Decimal
+  receivedAt  DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  cogsEntries COGS[]
+
+  @@index([sku, accountId])
+  @@index([accountId, receivedAt])
+  @@map("batches")
 }
 
 // ============================================

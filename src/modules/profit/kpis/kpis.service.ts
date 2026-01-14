@@ -89,10 +89,11 @@ function formatPeriodKey(date: Date, period: 'hour' | 'day' | 'week' | 'month'):
   switch (period) {
     case 'hour':
       return date.toISOString().slice(0, 13) + ':00:00'
-    case 'week':
+    case 'week': {
       const weekStart = new Date(date)
       weekStart.setDate(date.getDate() - date.getDay() + 1)
       return weekStart.toISOString().split('T')[0]
+    }
     case 'month':
       return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
     case 'day':
@@ -655,8 +656,59 @@ export async function getPayoutEstimateKPI(
   // Calculate other fees (non-FBA fees)
   const otherFees = totalFees - fbaFees
 
+  // Calculate COGS from historical snapshots (latest at/under report end).
+  let cogs = 0
+  if (accountId) {
+    const items = await prisma.orderItem.findMany({
+      where: {
+        order: orderWhere,
+      },
+      select: {
+        sku: true,
+        quantity: true,
+        order: { select: { marketplaceId: true } },
+      },
+    })
+
+    const qtyByKey = new Map<string, number>()
+    const skus = new Set<string>()
+    const marketplaceIds = new Set<string>()
+
+    for (const item of items) {
+      if (!item.order.marketplaceId) continue
+      const key = `${item.sku}::${item.order.marketplaceId}`
+      qtyByKey.set(key, (qtyByKey.get(key) || 0) + item.quantity)
+      skus.add(item.sku)
+      marketplaceIds.add(item.order.marketplaceId)
+    }
+
+    const asOf = endDate ? new Date(endDate) : new Date()
+    const latest = await prisma.cOGS.findMany({
+      where: {
+        accountId,
+        sku: { in: Array.from(skus) },
+        marketplaceId: { in: Array.from(marketplaceIds) },
+        createdAt: { lte: asOf },
+      },
+      orderBy: { createdAt: 'desc' },
+      distinct: ['sku', 'marketplaceId'],
+      select: { sku: true, marketplaceId: true, quantity: true, totalCost: true },
+    })
+
+    const unitCostByKey = new Map<string, number>()
+    for (const row of latest) {
+      const effectiveUnitCost = row.quantity > 0 ? Number(row.totalCost) / row.quantity : 0
+      unitCostByKey.set(`${row.sku}::${row.marketplaceId}`, effectiveUnitCost)
+    }
+
+    for (const [key, qty] of qtyByKey.entries()) {
+      const unitCost = unitCostByKey.get(key) || 0
+      cogs += unitCost * qty
+    }
+  }
+
   // Calculate total deductions
-  const totalDeductions = totalFees + refunds + advertising
+  const totalDeductions = totalFees + refunds + advertising + cogs
 
   // Calculate estimated payout
   const estimatedPayout = grossRevenue - totalDeductions
@@ -670,6 +722,7 @@ export async function getPayoutEstimateKPI(
       refunds: Number(refunds.toFixed(2)),
       returns: Number(returnsCost.toFixed(2)),
       advertising: Number(advertising.toFixed(2)),
+      cogs: Number(cogs.toFixed(2)),
       fbaFees: Number(fbaFees.toFixed(2)),
       other: 0, // Placeholder for other deductions
     },
