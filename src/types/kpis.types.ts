@@ -126,6 +126,7 @@ export interface PayoutEstimateKPI {
     refunds: number
     returns: number
     advertising: number
+    cogs: number
     fbaFees: number
     other: number
   }

@@ -1,8 +1,13 @@
 import { Request, Response, NextFunction } from 'express'
-import { AnyZodObject, ZodError } from 'zod'
+import { ZodError, ZodTypeAny } from 'zod'
 import { AppError } from './error.middleware'
 
-export const validate = (schema: AnyZodObject) => async (req: Request, res: Response, next: NextFunction) => {
+/**
+ * Request body validation middleware.
+ *
+ * Accepts any Zod schema (including refinements/effects), not just plain objects.
+ */
+export const validate = (schema: ZodTypeAny) => async (req: Request, _res: Response, next: NextFunction) => {
     try {
         await schema.parseAsync(req.body)
         next()

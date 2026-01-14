@@ -1,6 +1,5 @@
 import prisma from '../../config/db'
 import { AppError } from '../../middlewares/error.middleware'
-import { logger } from '../../config/logger'
 import {
   ProfitFilters,
   ProfitSummary,
@@ -708,7 +707,7 @@ export async function getProfitByMarketplace(
   // Calculate final metrics
   const results: MarketplaceProfitBreakdown[] = []
 
-  for (const [marketplaceId, breakdown] of marketplaceMap.entries()) {
+  for (const [, breakdown] of marketplaceMap.entries()) {
     const metrics = calculateProfitMetrics(
       breakdown.salesRevenue,
       breakdown.totalExpenses,
@@ -750,8 +749,18 @@ export async function getProfitTrends(
   filters: ProfitFilters,
   userId: string
 ): Promise<ProfitTrendsResponse> {
-  const { accountId, amazonAccountId, marketplaceId, sku, startDate, endDate, period = 'day' } =
-    filters
+  const {
+    accountId,
+    amazonAccountId,
+    marketplaceId,
+    sku,
+    startDate,
+    endDate,
+    period: periodRaw = 'day',
+  } = filters
+
+  // Normalize unsupported UI values to the supported API grouping set.
+  const period: 'day' | 'week' | 'month' = periodRaw === 'custom' ? 'day' : periodRaw
 
   // Verify account access
   if (accountId) {
@@ -996,7 +1005,7 @@ export async function getProfitTrends(
   // Calculate final metrics for each period
   const results: ProfitTrendData[] = []
 
-  for (const [periodKey, trendData] of periodMap.entries()) {
+  for (const [, trendData] of periodMap.entries()) {
     const metrics = calculateProfitMetrics(
       trendData.salesRevenue,
       trendData.totalExpenses,
