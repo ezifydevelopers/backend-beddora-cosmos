@@ -93,7 +93,12 @@ export async function getHistory(req: AuthRequest, res: Response, next: NextFunc
       marketplaceId: (req.query.marketplaceId as string) || undefined,
       startDate: (req.query.startDate as string) || undefined,
       endDate: (req.query.endDate as string) || undefined,
-      costMethod: (req.query.costMethod as any) || undefined,
+      costMethod:
+        req.query.costMethod === 'BATCH' ||
+        req.query.costMethod === 'TIME_PERIOD' ||
+        req.query.costMethod === 'WEIGHTED_AVERAGE'
+          ? req.query.costMethod
+          : undefined,
       limit: req.query.limit ? Number(req.query.limit) : undefined,
       offset: req.query.offset ? Number(req.query.offset) : undefined,
     })

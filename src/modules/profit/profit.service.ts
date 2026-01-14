@@ -824,13 +824,14 @@ export async function getProfitTrends(
     const orderDate = order.orderDate
 
     switch (period) {
-      case 'week':
+      case 'week': {
         // Get week start (Monday)
         const weekStart = new Date(orderDate)
         weekStart.setDate(orderDate.getDate() - orderDate.getDay() + 1)
         periodKey = weekStart.toISOString().split('T')[0]
         periodLabel = `Week of ${periodKey}`
         break
+      }
       case 'month':
         periodKey = `${orderDate.getFullYear()}-${String(orderDate.getMonth() + 1).padStart(2, '0')}`
         periodLabel = periodKey
@@ -902,11 +903,12 @@ export async function getProfitTrends(
     let periodKey: string
 
     switch (period) {
-      case 'week':
+      case 'week': {
         const weekStart = new Date(expenseDate)
         weekStart.setDate(expenseDate.getDate() - expenseDate.getDay() + 1)
         periodKey = weekStart.toISOString().split('T')[0]
         break
+      }
       case 'month':
         periodKey = `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, '0')}`
         break

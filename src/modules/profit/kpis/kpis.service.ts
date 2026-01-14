@@ -89,10 +89,11 @@ function formatPeriodKey(date: Date, period: 'hour' | 'day' | 'week' | 'month'):
   switch (period) {
     case 'hour':
       return date.toISOString().slice(0, 13) + ':00:00'
-    case 'week':
+    case 'week': {
       const weekStart = new Date(date)
       weekStart.setDate(date.getDate() - date.getDay() + 1)
       return weekStart.toISOString().split('T')[0]
+    }
     case 'month':
       return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
     case 'day':
