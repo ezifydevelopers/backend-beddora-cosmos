@@ -18,6 +18,7 @@ import reportsRoutes from './modules/reports/reports.routes'
 import adminRoutes from './modules/admin/admin.routes'
 import amazonRoutes from './modules/amazon/amazon.routes'
 import manualImportRoutes from './modules/manual-import/import.routes'
+import cogsRoutes from './modules/profit/cogs/cogs.routes'
 
 /**
  * Central route registration
@@ -48,6 +49,9 @@ export function registerRoutes(): Router {
 
   // Profit routes
   router.use('/profit', profitRoutes)
+
+  // COGS routes (profit dependency)
+  router.use('/cogs', cogsRoutes)
 
   // Inventory routes
   router.use('/inventory', inventoryRoutes)

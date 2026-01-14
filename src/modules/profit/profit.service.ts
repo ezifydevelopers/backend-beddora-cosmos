@@ -119,6 +119,54 @@ function calculateProfitMetrics(
   }
 }
 
+/**
+ * Build a map of latest COGS snapshots per (sku, marketplaceId) as of a given date.
+ *
+ * Performance:
+ * - Uses Prisma `distinct` with `orderBy createdAt desc` to pick the latest snapshot per pair.
+ */
+async function getLatestCogsSnapshots(params: {
+  accountId: string
+  skus: string[]
+  marketplaceIds: string[]
+  asOf: Date
+}): Promise<Map<string, { effectiveUnitCost: number }>> {
+  if (params.skus.length === 0 || params.marketplaceIds.length === 0) {
+    return new Map()
+  }
+
+  const rows = await prisma.cOGS.findMany({
+    where: {
+      accountId: params.accountId,
+      sku: { in: params.skus },
+      marketplaceId: { in: params.marketplaceIds },
+      createdAt: { lte: params.asOf },
+    },
+    orderBy: { createdAt: 'desc' },
+    distinct: ['sku', 'marketplaceId'],
+    select: {
+      sku: true,
+      marketplaceId: true,
+      quantity: true,
+      totalCost: true,
+    },
+  })
+
+  const map = new Map<string, { effectiveUnitCost: number }>()
+  for (const row of rows) {
+    const key = `${row.sku}::${row.marketplaceId}`
+    const totalCost = Number(row.totalCost)
+    const effectiveUnitCost = row.quantity > 0 ? totalCost / row.quantity : 0
+    map.set(key, { effectiveUnitCost: Number(effectiveUnitCost.toFixed(6)) })
+  }
+
+  return map
+}
+
+function keyForSkuMarketplace(sku: string, marketplaceId: string): string {
+  return `${sku}::${marketplaceId}`
+}
+
 // ============================================
 // PROFIT SUMMARY
 // ============================================
@@ -154,13 +202,14 @@ export async function getProfitSummary(
 
   const dateFilter = buildDateFilter(startDate, endDate)
 
-  // Build base where clause for orders
-  const orderWhere: any = {}
-  if (accountId) orderWhere.accountId = accountId
-  if (marketplaceId) orderWhere.marketplaceId = marketplaceId
-  if (dateFilter) orderWhere.orderDate = dateFilter
+  // Build base where clause for orders (without SKU join).
+  const baseOrderWhere: any = {}
+  if (accountId) baseOrderWhere.accountId = accountId
+  if (marketplaceId) baseOrderWhere.marketplaceId = marketplaceId
+  if (dateFilter) baseOrderWhere.orderDate = dateFilter
 
-  // If filtering by SKU, we need to join with OrderItem
+  // If filtering by SKU, we need to join with OrderItem for Order aggregation.
+  const orderWhere: any = { ...baseOrderWhere }
   if (sku) {
     orderWhere.items = {
       some: {
@@ -226,57 +275,53 @@ export async function getProfitSummary(
   const totalExpenses = Number(expensesAggregation._sum.amount || 0)
 
   // Calculate COGS
-  // COGS is calculated based on SKU and quantity sold
-  const cogsWhere: any = {}
-  if (accountId) cogsWhere.accountId = accountId
-  if (sku) cogsWhere.sku = sku
-  if (dateFilter) cogsWhere.purchaseDate = dateFilter
-
-  // Get COGS records
-  const cogsRecords = await prisma.cOGS.findMany({
-    where: cogsWhere,
-  })
-
-  // Calculate total COGS based on quantity sold
-  // For simplicity, we use FIFO (First In First Out) method
-  // In production, you might want to implement weighted average or specific identification
+  // COGS is calculated based on quantity sold per SKU per marketplace.
+  // We use historical snapshots from the COGS table: the latest (sku, marketplace) entry at/under the report end date.
   let totalCOGS = 0
 
-  if (sku) {
-    // If filtering by SKU, calculate COGS for that SKU
-    const orderItems = await prisma.orderItem.findMany({
+  if (accountId) {
+    const items = await prisma.orderItem.findMany({
       where: {
-        sku,
-        order: orderWhere,
+        ...(sku ? { sku } : {}),
+        order: baseOrderWhere,
       },
       select: {
+        sku: true,
         quantity: true,
-        createdAt: true,
+        order: {
+          select: {
+            marketplaceId: true,
+            orderDate: true,
+          },
+        },
       },
     })
 
-    // Simple FIFO calculation
-    const totalQuantitySold = orderItems.reduce((sum, item) => sum + item.quantity, 0)
+    const salesQty = new Map<string, number>()
+    const skus = new Set<string>()
+    const marketplaceIds = new Set<string>()
 
-    // Sort COGS by purchase date (FIFO)
-    const sortedCOGS = cogsRecords.sort(
-      (a, b) => a.purchaseDate.getTime() - b.purchaseDate.getTime()
-    )
-
-    let remainingQuantity = totalQuantitySold
-    for (const cogsRecord of sortedCOGS) {
-      if (remainingQuantity <= 0) break
-
-      const quantityUsed = Math.min(remainingQuantity, cogsRecord.quantity)
-      totalCOGS += Number(cogsRecord.cost) * quantityUsed
-      remainingQuantity -= quantityUsed
+    for (const item of items) {
+      if (!item.order.marketplaceId) continue
+      const key = keyForSkuMarketplace(item.sku, item.order.marketplaceId)
+      salesQty.set(key, (salesQty.get(key) || 0) + item.quantity)
+      skus.add(item.sku)
+      marketplaceIds.add(item.order.marketplaceId)
     }
-  } else {
-    // If not filtering by SKU, sum all COGS
-    totalCOGS = cogsRecords.reduce(
-      (sum, record) => sum + Number(record.cost) * record.quantity,
-      0
-    )
+
+    const asOf = endDate ? new Date(endDate) : new Date()
+    const latestCogs = await getLatestCogsSnapshots({
+      accountId,
+      skus: Array.from(skus),
+      marketplaceIds: Array.from(marketplaceIds),
+      asOf,
+    })
+
+    for (const [key, qty] of salesQty.entries()) {
+      const snapshot = latestCogs.get(key)
+      if (!snapshot) continue
+      totalCOGS += snapshot.effectiveUnitCost * qty
+    }
   }
 
   // Calculate profit metrics
@@ -356,6 +401,7 @@ export async function getProfitByProduct(
 
   // Group by SKU and calculate metrics
   const skuMap = new Map<string, ProductProfitBreakdown>()
+  const skuQtyByMarketplace = new Map<string, Map<string, number>>() // sku -> marketplaceId -> qty
 
   for (const item of orderItems) {
     const sku = item.sku
@@ -385,6 +431,16 @@ export async function getProfitByProduct(
     breakdown.salesRevenue += Number(item.totalPrice)
     breakdown.unitsSold += item.quantity
 
+    // Track sold quantity per marketplace for accurate COGS allocation
+    const itemMarketplaceId = item.order.marketplaceId
+    if (itemMarketplaceId) {
+      if (!skuQtyByMarketplace.has(sku)) {
+        skuQtyByMarketplace.set(sku, new Map())
+      }
+      const mpMap = skuQtyByMarketplace.get(sku)!
+      mpMap.set(itemMarketplaceId, (mpMap.get(itemMarketplaceId) || 0) + item.quantity)
+    }
+
     // Add fees (proportional to item value)
     const orderTotal = Number(item.order.totalAmount)
     if (orderTotal > 0) {
@@ -403,21 +459,17 @@ export async function getProfitByProduct(
     breakdown.orderCount += 1
   }
 
-  // Calculate COGS for each SKU
-  const cogsWhere: any = {}
-  if (accountId) cogsWhere.accountId = accountId
-  if (dateFilter) cogsWhere.purchaseDate = dateFilter
-
-  const cogsRecords = await prisma.cOGS.findMany({
-    where: cogsWhere,
-  })
-
-  // Group COGS by SKU
-  const cogsBySku = new Map<string, number>()
-  for (const record of cogsRecords) {
-    const existing = cogsBySku.get(record.sku) || 0
-    cogsBySku.set(record.sku, existing + Number(record.cost) * record.quantity)
-  }
+  // Build latest COGS snapshots for the SKUs/marketplaces present in sales.
+  const latestCogsByKey = accountId
+    ? await getLatestCogsSnapshots({
+        accountId,
+        skus: Array.from(skuQtyByMarketplace.keys()),
+        marketplaceIds: Array.from(
+          new Set(Array.from(skuQtyByMarketplace.values()).flatMap((m) => Array.from(m.keys())))
+        ),
+        asOf: endDate ? new Date(endDate) : new Date(),
+      })
+    : new Map()
 
   // Calculate expenses per SKU (proportional to revenue)
   const expenseWhere: any = {}
@@ -435,8 +487,19 @@ export async function getProfitByProduct(
   const results: ProductProfitBreakdown[] = []
 
   for (const [sku, breakdown] of skuMap.entries()) {
-    // Set COGS
-    breakdown.totalCOGS = cogsBySku.get(sku) || 0
+    // Set COGS based on sold quantities per marketplace and latest COGS snapshots
+    const mpQty = skuQtyByMarketplace.get(sku)
+    if (mpQty && latestCogsByKey.size > 0) {
+      let cogs = 0
+      for (const [mpId, qty] of mpQty.entries()) {
+        const snapshot = latestCogsByKey.get(keyForSkuMarketplace(sku, mpId))
+        if (!snapshot) continue
+        cogs += snapshot.effectiveUnitCost * qty
+      }
+      breakdown.totalCOGS = cogs
+    } else {
+      breakdown.totalCOGS = 0
+    }
 
     // Allocate expenses proportionally
     if (totalRevenue > 0) {
@@ -599,15 +662,7 @@ export async function getProfitByMarketplace(
   })
 
   // Get COGS records
-  const cogsWhere: any = {}
-  if (accountId) cogsWhere.accountId = accountId
-  if (dateFilter) cogsWhere.purchaseDate = dateFilter
-
-  const cogsRecords = await prisma.cOGS.findMany({
-    where: cogsWhere,
-  })
-
-  // Calculate COGS per marketplace (simplified - allocate based on SKU sales)
+  // Build latest COGS snapshots (historical) per (sku, marketplace) as-of endDate.
   const skuSalesByMarketplace = new Map<string, Map<string, number>>() // marketplaceId -> sku -> quantity
 
   for (const item of orderItems) {
@@ -624,28 +679,27 @@ export async function getProfitByMarketplace(
   }
 
   // Allocate COGS to marketplaces
+  const latestCogsByKey =
+    accountId && skuSalesByMarketplace.size > 0
+      ? await getLatestCogsSnapshots({
+          accountId,
+          skus: Array.from(
+            new Set(Array.from(skuSalesByMarketplace.values()).flatMap((m) => Array.from(m.keys())))
+          ),
+          marketplaceIds: Array.from(skuSalesByMarketplace.keys()),
+          asOf: endDate ? new Date(endDate) : new Date(),
+        })
+      : new Map()
+
   for (const [marketplaceId, skuMap] of skuSalesByMarketplace.entries()) {
     const breakdown = marketplaceMap.get(marketplaceId)
     if (!breakdown) continue
 
     let marketplaceCOGS = 0
     for (const [sku, quantitySold] of skuMap.entries()) {
-      const cogsForSku = cogsRecords.filter((r) => r.sku === sku)
-      if (cogsForSku.length > 0) {
-        // Simple FIFO
-        const sortedCOGS = cogsForSku.sort(
-          (a, b) => a.purchaseDate.getTime() - b.purchaseDate.getTime()
-        )
-
-        let remainingQuantity = quantitySold
-        for (const cogsRecord of sortedCOGS) {
-          if (remainingQuantity <= 0) break
-
-          const quantityUsed = Math.min(remainingQuantity, cogsRecord.quantity)
-          marketplaceCOGS += Number(cogsRecord.cost) * quantityUsed
-          remainingQuantity -= quantityUsed
-        }
-      }
+      const snapshot = latestCogsByKey.get(keyForSkuMarketplace(sku, marketplaceId))
+      if (!snapshot) continue
+      marketplaceCOGS += snapshot.effectiveUnitCost * quantitySold
     }
 
     breakdown.totalCOGS = marketplaceCOGS
@@ -750,6 +804,9 @@ export async function getProfitTrends(
 
   // Group by period
   const periodMap = new Map<string, ProfitTrendData>()
+  const salesQtyByPeriod = new Map<string, Map<string, number>>() // periodKey -> (sku::marketplaceId) -> qty
+  const skusInSales = new Set<string>()
+  const marketplacesInSales = new Set<string>()
 
   for (const order of orders) {
     let periodKey: string
@@ -799,6 +856,21 @@ export async function getProfitTrends(
     trendData.totalFees += order.fees.reduce((sum, fee) => sum + Number(fee.amount), 0)
     trendData.totalRefunds += order.refunds.reduce((sum, refund) => sum + Number(refund.amount), 0)
     trendData.orderCount += 1
+
+    // Track sold quantity for COGS computation (per SKU + marketplace per period)
+    if (order.marketplaceId) {
+      if (!salesQtyByPeriod.has(periodKey)) {
+        salesQtyByPeriod.set(periodKey, new Map())
+      }
+      const periodSales = salesQtyByPeriod.get(periodKey)!
+
+      for (const item of order.items as any[]) {
+        const key = keyForSkuMarketplace(item.sku as string, order.marketplaceId)
+        periodSales.set(key, (periodSales.get(key) || 0) + (item.quantity as number))
+        skusInSales.add(item.sku as string)
+        marketplacesInSales.add(order.marketplaceId)
+      }
+    }
   }
 
   // Get expenses by period
@@ -841,48 +913,83 @@ export async function getProfitTrends(
     }
   }
 
-  // Calculate COGS by period (simplified)
-  const cogsWhere: any = {
-    accountId: accountId || undefined,
-    purchaseDate: {
-      gte: start,
-      lte: end,
-    },
-  }
+  // Calculate COGS by period using historical COGS snapshots.
+  // For each period, we pick the latest COGS snapshot at/under the end of that period.
+  if (accountId && salesQtyByPeriod.size > 0 && skusInSales.size > 0 && marketplacesInSales.size > 0) {
+    const cogsTimeline = await prisma.cOGS.findMany({
+      where: {
+        accountId,
+        sku: { in: Array.from(skusInSales) },
+        marketplaceId: { in: Array.from(marketplacesInSales) },
+        createdAt: { lte: end },
+      },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        sku: true,
+        marketplaceId: true,
+        createdAt: true,
+        quantity: true,
+        totalCost: true,
+      },
+    })
 
-  if (sku) {
-    cogsWhere.sku = sku
-  }
-
-  const cogsRecords = await prisma.cOGS.findMany({
-    where: cogsWhere,
-  })
-
-  // Allocate COGS to periods (simplified - based on purchase date)
-  for (const cogsRecord of cogsRecords) {
-    const purchaseDate = cogsRecord.purchaseDate
-    let periodKey: string
-
-    switch (period) {
-      case 'week':
-        const weekStart = new Date(purchaseDate)
-        weekStart.setDate(purchaseDate.getDate() - purchaseDate.getDay() + 1)
-        periodKey = weekStart.toISOString().split('T')[0]
-        break
-      case 'month':
-        periodKey = `${purchaseDate.getFullYear()}-${String(purchaseDate.getMonth() + 1).padStart(2, '0')}`
-        break
-      case 'day':
-      default:
-        periodKey = purchaseDate.toISOString().split('T')[0]
-        break
+    const timelineByKey = new Map<string, Array<{ at: Date; effectiveUnitCost: number }>>()
+    for (const row of cogsTimeline) {
+      const key = keyForSkuMarketplace(row.sku, row.marketplaceId)
+      const effectiveUnitCost = row.quantity > 0 ? Number(row.totalCost) / row.quantity : 0
+      if (!timelineByKey.has(key)) timelineByKey.set(key, [])
+      timelineByKey.get(key)!.push({ at: row.createdAt, effectiveUnitCost })
     }
 
-    const trendData = periodMap.get(periodKey)
-    if (trendData) {
-      // Simplified: allocate COGS based on purchase date
-      // In production, you'd want to match COGS to actual sales
-      trendData.totalCOGS += Number(cogsRecord.cost) * cogsRecord.quantity
+    const periodEndDate = (pKey: string): Date => {
+      if (period === 'month') {
+        const [y, m] = pKey.split('-').map((v) => Number(v))
+        const lastDay = new Date(y, m, 0) // month is 1-based here because `m` is already 1..12
+        lastDay.setHours(23, 59, 59, 999)
+        return lastDay
+      }
+      const startOf = new Date(pKey)
+      if (period === 'week') {
+        const endOfWeek = new Date(startOf)
+        endOfWeek.setDate(startOf.getDate() + 6)
+        endOfWeek.setHours(23, 59, 59, 999)
+        return endOfWeek
+      }
+      startOf.setHours(23, 59, 59, 999)
+      return startOf
+    }
+
+    const latestUnitCostAt = (key: string, asOf: Date): number => {
+      const arr = timelineByKey.get(key)
+      if (!arr || arr.length === 0) return 0
+
+      // Binary search last entry with at <= asOf
+      let lo = 0
+      let hi = arr.length - 1
+      let best = -1
+      while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2)
+        if (arr[mid].at.getTime() <= asOf.getTime()) {
+          best = mid
+          lo = mid + 1
+        } else {
+          hi = mid - 1
+        }
+      }
+      return best >= 0 ? arr[best].effectiveUnitCost : 0
+    }
+
+    for (const [pKey, qtyMap] of salesQtyByPeriod.entries()) {
+      const trendData = periodMap.get(pKey)
+      if (!trendData) continue
+      const asOf = periodEndDate(pKey)
+
+      let periodCOGS = 0
+      for (const [key, qty] of qtyMap.entries()) {
+        const unitCost = latestUnitCostAt(key, asOf)
+        periodCOGS += unitCost * qty
+      }
+      trendData.totalCOGS = periodCOGS
     }
   }
 
