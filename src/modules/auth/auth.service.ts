@@ -17,6 +17,34 @@ import { hashPassword } from './password.service'
 import { generateEmailVerificationToken } from './token.service'
 
 /**
+ * Ensure user has at least the default VIEWER role.
+ * Returns the current role names after ensuring.
+ */
+async function ensureDefaultViewerRole(userId: string): Promise<string[]> {
+  const existingRoles = await prisma.userRole.findMany({
+    where: { userId },
+    include: { role: true },
+  })
+
+  if (existingRoles.length > 0) {
+    return existingRoles.map((ur) => ur.role.name)
+  }
+
+  const viewerRole = await prisma.role.findUnique({ where: { name: 'VIEWER' } })
+  if (viewerRole) {
+    await prisma.userRole.create({
+      data: {
+        userId,
+        roleId: viewerRole.id,
+      },
+    })
+    return [viewerRole.name]
+  }
+
+  return []
+}
+
+/**
  * Authentication service
  * Handles all business logic for authentication
  * 
@@ -44,7 +72,7 @@ import { generateEmailVerificationToken } from './token.service'
 function generateAccessToken(payload: TokenPayload): string {
   return jwt.sign(payload, env.jwtSecret, {
     expiresIn: env.jwtExpiresIn,
-  })
+  } as jwt.SignOptions)
 }
 
 /**
@@ -62,7 +90,7 @@ function generateAccessToken(payload: TokenPayload): string {
 async function generateAndStoreRefreshToken(userId: string, payload: TokenPayload): Promise<string> {
   const refreshToken = jwt.sign(payload, env.jwtRefreshSecret, {
     expiresIn: env.jwtRefreshExpiresIn,
-  })
+  } as jwt.SignOptions)
 
   // Calculate expiration date (30 days from now)
   const expiresAt = new Date()
@@ -156,7 +184,7 @@ export async function register(data: RegisterData): Promise<{ user: { id: string
   })
 
   // Assign default 'VIEWER' role
-  const viewerRole = await prisma.role.findUnique({ where: { name: 'viewer' } })
+  const viewerRole = await prisma.role.findUnique({ where: { name: 'VIEWER' } })
   if (viewerRole) {
     await prisma.userRole.create({
       data: {
@@ -237,8 +265,11 @@ export async function login(data: LoginData): Promise<AuthResponse> {
     throw new AppError('Invalid email or password', 401)
   }
 
-  // Get user roles
-  const roleNames = user.roles.map((ur) => ur.role.name)
+  // Get user roles (ensure default VIEWER role exists)
+  let roleNames = user.roles.map((ur) => ur.role.name)
+  if (roleNames.length === 0) {
+    roleNames = await ensureDefaultViewerRole(user.id)
+  }
 
   // Get default account if exists
   const defaultAccount = await prisma.userAccount.findFirst({
@@ -325,8 +356,11 @@ export async function refreshToken(refreshTokenString: string): Promise<RefreshT
     throw new AppError('User account is inactive or unverified', 403)
   }
 
-  // Get updated roles
-  const roleNames = tokenRecord.user.roles.map((ur: { role: { name: string } }) => ur.role.name)
+  // Get updated roles (ensure default VIEWER role exists)
+  let roleNames = tokenRecord.user.roles.map((ur: { role: { name: string } }) => ur.role.name)
+  if (roleNames.length === 0) {
+    roleNames = await ensureDefaultViewerRole(tokenRecord.user.id)
+  }
 
   // Get default account
   const defaultAccount = await prisma.userAccount.findFirst({
@@ -362,8 +396,10 @@ export async function refreshToken(refreshTokenString: string): Promise<RefreshT
   return { accessToken: newAccessToken, refreshToken: newRefreshToken }
   */
 
+  // Return the same refresh token (no rotation for now)
   return {
     accessToken: newAccessToken,
+    refreshToken: refreshTokenString,
   }
 }
 

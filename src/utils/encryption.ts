@@ -1,6 +1,40 @@
 import crypto from 'crypto'
 
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '12345678901234567890123456789012' // Must be 32 characters
+/**
+ * Encryption Key Validation
+ * 
+ * CRITICAL: Encryption key must be exactly 32 characters for AES-256-CBC
+ * Never use default/fallback keys in production - fail fast if missing
+ */
+function getEncryptionKey(): string {
+  const key = process.env.ENCRYPTION_KEY
+  
+  if (!key) {
+    throw new Error(
+      'CRITICAL: ENCRYPTION_KEY environment variable is required. ' +
+      'Generate a secure 32-character key: openssl rand -hex 16'
+    )
+  }
+  
+  if (key.length !== 32) {
+    throw new Error(
+      `ENCRYPTION_KEY must be exactly 32 characters. Current length: ${key.length}. ` +
+      'Generate a secure key: openssl rand -hex 16'
+    )
+  }
+  
+  // Warn if using default/weak key (only in development)
+  if (key === '12345678901234567890123456789012' && process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'CRITICAL: Cannot use default encryption key in production. ' +
+      'Set ENCRYPTION_KEY to a secure 32-character value.'
+    )
+  }
+  
+  return key
+}
+
+const ENCRYPTION_KEY = getEncryptionKey()
 const IV_LENGTH = 16 // For AES, this is always 16
 
 /**

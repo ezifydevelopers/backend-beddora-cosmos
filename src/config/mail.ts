@@ -38,7 +38,8 @@ export async function sendEmail(
   to: string,
   subject: string,
   html: string,
-  text?: string
+  text?: string,
+  attachments?: Array<{ filename: string; content: Buffer; contentType: string }>
 ): Promise<void> {
   try {
     await transporter.sendMail({
@@ -47,6 +48,7 @@ export async function sendEmail(
       subject,
       text: text || html.replace(/<[^>]*>/g, ''),
       html,
+      attachments,
     })
     logger.info(`Email sent to ${to}`)
   } catch (error) {

@@ -40,9 +40,60 @@ export function createApp(): Express {
     app.use(morgan('combined', { stream: { write: (message) => logger.info(message.trim()) } }))
   }
 
-  // Health check endpoint
-  app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() })
+  // Health check endpoint with token validity checker
+  app.get('/health', async (req, res) => {
+    try {
+      const healthStatus: any = {
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        services: {
+          database: 'ok',
+          redis: 'unknown',
+        },
+      }
+
+      // Check database connection
+      try {
+        const prisma = (await import('./config/db')).default
+        await prisma.$queryRaw`SELECT 1`
+        healthStatus.services.database = 'ok'
+      } catch (error) {
+        healthStatus.services.database = 'error'
+        healthStatus.status = 'degraded'
+      }
+
+      // Check Redis connection
+      try {
+        const { isRedisAvailable } = await import('./config/redis')
+        healthStatus.services.redis = isRedisAvailable() ? 'ok' : 'unavailable'
+      } catch (error) {
+        healthStatus.services.redis = 'error'
+      }
+
+      // Check token validity (if amazonAccountId provided)
+      const amazonAccountId = req.query.amazonAccountId as string | undefined
+      if (amazonAccountId) {
+        try {
+          const { SPAPIClient } = await import('./modules/amazon/sp-api-wrapper.service')
+          const client = new SPAPIClient(amazonAccountId)
+          // Try to get a simple endpoint to verify token
+          await client.get('/orders/v0/orders', { MarketplaceIds: ['ATVPDKIKX0DER'], MaxResultsPerPage: 1 })
+          healthStatus.services.amazonToken = 'valid'
+        } catch (error) {
+          healthStatus.services.amazonToken = 'invalid'
+          healthStatus.status = 'degraded'
+        }
+      }
+
+      const statusCode = healthStatus.status === 'ok' ? 200 : 503
+      res.status(statusCode).json(healthStatus)
+    } catch (error) {
+      res.status(503).json({
+        status: 'error',
+        timestamp: new Date().toISOString(),
+        error: (error as Error).message,
+      })
+    }
   })
 
   // Register all API routes

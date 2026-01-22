@@ -108,14 +108,32 @@ const refreshTokenSchema = z
 /**
  * Link Amazon account schema
  * Validates data for linking a new Amazon Seller Central account
+ * 
+ * Supports both SP-API (lwaClientId/lwaClientSecret) and legacy (accessKey/secretKey) formats
+ * At least one of lwaClientId or accessKey must be provided
  */
 export const linkAmazonAccountSchema = z.object({
   marketplace: marketplaceCodeSchema,
   sellerId: sellerIdSchema,
-  accessKey: accessKeySchema,
-  secretKey: secretKeySchema,
+  // SP-API fields (preferred)
+  lwaClientId: z.string().min(20, 'App ID must be at least 20 characters').max(500).trim().optional(),
+  lwaClientSecret: z.string().min(20).max(500).trim().optional(), // Optional for Application IDs
+  // Legacy fields (for backward compatibility)
+  accessKey: accessKeySchema.optional(),
+  secretKey: secretKeySchema.optional(),
+  // Required
   refreshToken: refreshTokenSchema,
-})
+  // Optional SP-API fields
+  iamRoleArn: z.string().max(500).trim().optional(),
+  marketplaceIds: z.array(z.string()).optional(),
+  region: z.string().max(50).trim().optional(),
+}).refine(
+  (data) => data.lwaClientId || data.accessKey,
+  {
+    message: 'Either lwaClientId (App ID) or accessKey must be provided',
+    path: ['lwaClientId'],
+  }
+)
 
 export type LinkAmazonAccountInput = z.infer<typeof linkAmazonAccountSchema>
 

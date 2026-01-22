@@ -47,13 +47,23 @@ export interface SwitchAccountResponse {
 
 /**
  * Link Amazon Account data
+ * 
+ * Supports both legacy (accessKey/secretKey) and SP-API (lwaClientId/lwaClientSecret) formats
  */
 export interface LinkAmazonAccountData {
   marketplace: string
   sellerId: string
-  accessKey: string
-  secretKey: string
+  // SP-API fields (preferred)
+  lwaClientId?: string // App ID from Seller Central
+  lwaClientSecret?: string // Client Secret (optional for Application IDs)
   refreshToken: string
+  // Legacy fields (for backward compatibility)
+  accessKey?: string // Maps to lwaClientId if not provided
+  secretKey?: string // Maps to lwaClientSecret if not provided
+  // Optional SP-API fields
+  iamRoleArn?: string // IAM Role ARN (can be added later)
+  marketplaceIds?: string[] // Marketplace IDs (defaults based on marketplace)
+  region?: string // AWS region (defaults to us-east-1)
 }
 
 /**

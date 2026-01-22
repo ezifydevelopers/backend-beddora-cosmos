@@ -43,6 +43,22 @@ model User {
   inventoryImports InventoryImportStaging[]
   listingImports ListingImportStaging[]
   refundImports  RefundImportStaging[]
+  reportSchedules ReportSchedule[]
+  ppcBulkHistory PPCBulkHistory[]
+  listingAlerts ListingAlert[]
+  buyBoxAlerts BuyBoxAlert[]
+  feeChangeAlerts FeeChangeAlert[]
+  feedbackReviewAlerts FeedbackReviewAlert[]
+  emailTemplates EmailTemplate[]
+  schedulingRules SchedulingRule[]
+  reviewStats ReviewStats[]
+  fbaInventoryAlerts FbaInventoryAlert[]
+  refundDiscrepancies RefundDiscrepancy[]
+  refundDiscrepancyHistory RefundDiscrepancyHistory[]
+  reimbursementCases ReimbursementCase[]
+  caseHistory CaseHistory[]
+  userMarketplaces UserMarketplace[]
+  oauthStates OAuthState[]
 
   @@index([email])
   @@map("users")
@@ -215,10 +231,25 @@ model Account {
   userPermissions UserPermission[]
   products    Product[]
   orders      Order[]
+  returns     Return[]
   ppcCampaigns PPC_Campaign[]
   expenses    Expense[]
   cashflow    Cashflow[]
   cogs        COGS[]
+  batches     Batch[]
+  reportSchedules ReportSchedule[]
+  inventoryStock InventoryStock[]
+  inventoryForecasts InventoryForecast[]
+  inventoryKpis InventoryKPI[]
+  ppcDashboardCampaigns PPCCampaign[]
+  ppcDashboardAdGroups PPCAdGroup[]
+  ppcDashboardKeywords PPCKeyword[]
+  ppcBulkHistory PPCBulkHistory[]
+  schedulingRules SchedulingRule[]
+  reviewStats ReviewStats[]
+  fbaInventoryAlerts FbaInventoryAlert[]
+  refundDiscrepancies RefundDiscrepancy[]
+  reimbursementCases ReimbursementCase[]
 
   @@index([sellerId])
   @@map("accounts")
@@ -230,6 +261,8 @@ model Marketplace {
   code        String   @unique // 'amazon', 'ebay', etc.
   region      String?
   baseCurrency String? // e.g., 'USD', 'EUR', 'GBP'
+  currency    String?  // e.g., 'USD', 'EUR', 'GBP'
+  timezone    String?  // e.g., 'America/Los_Angeles'
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -239,8 +272,73 @@ model Marketplace {
   rolePermissions RolePermission[]
   orders Order[] @relation("MarketplaceOrders")
   expenses Expense[] @relation("MarketplaceExpenses")
+  returns Return[] @relation("MarketplaceReturns")
+  cogs COGS[]
+  inventoryStock InventoryStock[]
+  inventoryForecasts InventoryForecast[]
+  purchaseOrders PurchaseOrder[]
+  inventoryKpis InventoryKPI[]
+  ppcDashboardCampaigns PPCCampaign[]
+  ppcDashboardAdGroups PPCAdGroup[]
+  ppcDashboardKeywords PPCKeyword[]
+  listingAlerts ListingAlert[]
+  listingHistory ListingHistory[]
+  buyBoxAlerts BuyBoxAlert[]
+  buyBoxHistory BuyBoxHistory[]
+  feeChangeAlerts FeeChangeAlert[]
+  feeChangeHistory FeeChangeHistory[]
+  feedbackReviewAlerts FeedbackReviewAlert[]
+  feedbackReviewHistory FeedbackReviewHistory[]
+  emailTemplates EmailTemplate[]
+  schedulingRules SchedulingRule[]
+  reviewStats ReviewStats[]
+  fbaInventoryAlerts FbaInventoryAlert[]
+  refundDiscrepancies RefundDiscrepancy[]
+  reimbursementCases ReimbursementCase[]
+  userMarketplaces UserMarketplace[]
 
   @@map("marketplaces")
+}
+
+// ============================================
+// MULTI-CURRENCY
+// ============================================
+
+model Currency {
+  id             String   @id @default(uuid())
+  code           String   @unique // USD, GBP, EUR
+  name           String
+  symbol         String?
+  isBaseCurrency Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  fromCurrencyRates ExchangeRate[] @relation("FromCurrency")
+  toCurrencyRates   ExchangeRate[] @relation("ToCurrency")
+
+  @@index([code])
+  @@index([isBaseCurrency])
+  @@map("currencies")
+}
+
+model ExchangeRate {
+  id             String   @id @default(uuid())
+  fromCurrencyId String
+  toCurrencyId   String
+  rate           Decimal  @default(1)
+  fetchedAt      DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  fromCurrency   Currency @relation("FromCurrency", fields: [fromCurrencyId], references: [id], onDelete: Cascade)
+  toCurrency     Currency @relation("ToCurrency", fields: [toCurrencyId], references: [id], onDelete: Cascade)
+
+  @@index([fromCurrencyId])
+  @@index([toCurrencyId])
+  @@index([fetchedAt])
+  @@map("exchange_rates")
 }
 
 model UserAccount {
@@ -280,6 +378,29 @@ model AccountMarketplace {
   @@map("account_marketplaces")
 }
 
+model UserMarketplace {
+  id              String   @id @default(uuid())
+  userId          String
+  marketplaceId   String
+  amazonAccountId String?
+  credentials     Json?    // Encrypted API credentials
+  linkedAt        DateTime @default(now())
+  status          String   @default("active") // 'active', 'inactive'
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketplace     Marketplace  @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+  amazonAccount   AmazonAccount? @relation(fields: [amazonAccountId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, marketplaceId])
+  @@index([userId])
+  @@index([marketplaceId])
+  @@index([amazonAccountId])
+  @@map("user_marketplaces")
+}
+
 // ============================================
 // PRODUCTS & INVENTORY
 // ============================================
@@ -307,6 +428,16 @@ model Product {
   inventory       Inventory[]
   purchaseOrders  PurchaseOrderItem[]
   rolePermissions RolePermission[]
+  feeChangeAlerts FeeChangeAlert[]
+  feeChangeHistory FeeChangeHistory[]
+  feedbackReviewAlerts FeedbackReviewAlert[]
+  feedbackReviewHistory FeedbackReviewHistory[]
+  emailTemplates EmailTemplate[]
+  schedulingRules SchedulingRule[]
+  reviewStats ReviewStats[]
+  fbaInventoryAlerts FbaInventoryAlert[]
+  refundDiscrepancies RefundDiscrepancy[]
+  reimbursementCases ReimbursementCase[]
 
   @@unique([accountId, sku])
   @@index([accountId])
@@ -329,15 +460,95 @@ model Inventory {
   @@map("inventory")
 }
 
+model InventoryStock {
+  id               String   @id @default(uuid())
+  sku              String
+  accountId        String
+  marketplaceId    String?
+  amazonAccountId  String?
+  quantityAvailable Int     @default(0)
+  quantityReserved  Int     @default(0)
+  lowStockThreshold Int     @default(10)
+  lastSyncedAt     DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  account       Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace   Marketplace? @relation(fields: [marketplaceId], references: [id], onDelete: SetNull)
+  amazonAccount AmazonAccount? @relation(fields: [amazonAccountId], references: [id], onDelete: SetNull)
+
+  @@unique([accountId, sku, marketplaceId])
+  @@index([accountId])
+  @@index([sku])
+  @@index([marketplaceId])
+  @@index([accountId, sku, marketplaceId])
+  @@map("inventory_stock")
+}
+
+model InventoryForecast {
+  id               String   @id @default(uuid())
+  sku              String
+  accountId        String
+  marketplaceId    String?
+  currentStock     Int      @default(0)
+  salesVelocity    Decimal  @default(0) // units per day
+  forecast3Day     Decimal  @default(0)
+  forecast7Day     Decimal  @default(0)
+  forecast30Day    Decimal  @default(0)
+  restockThreshold Int      @default(0)
+  alertSent        Boolean  @default(false)
+  lastCalculatedAt DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  account       Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace   Marketplace? @relation(fields: [marketplaceId], references: [id], onDelete: SetNull)
+
+  @@unique([accountId, sku, marketplaceId])
+  @@index([accountId])
+  @@index([sku])
+  @@index([marketplaceId])
+  @@index([accountId, sku, marketplaceId])
+  @@map("inventory_forecasts")
+}
+
+model InventoryKPI {
+  id                   String   @id @default(uuid())
+  sku                  String
+  accountId            String
+  marketplaceId        String?
+  daysOfStockLeft      Decimal  @default(0)
+  overstockRisk        Boolean  @default(false)
+  fifoBatchAssignments Json?
+  lastCalculatedAt     DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  account       Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace   Marketplace? @relation(fields: [marketplaceId], references: [id], onDelete: SetNull)
+
+  @@unique([accountId, sku, marketplaceId])
+  @@index([accountId])
+  @@index([sku])
+  @@index([marketplaceId])
+  @@index([accountId, sku, marketplaceId])
+  @@map("inventory_kpis")
+}
+
 model Supplier {
-  id          String   @id @default(uuid())
-  name        String
-  email       String?
-  phone       String?
-  address     String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(uuid())
+  name          String
+  contactInfo   Json?
+  leadTimeDays  Int      @default(14)
+  email         String?
+  phone         String?
+  address       String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   // Relations
   purchaseOrders PurchaseOrder[]
@@ -346,31 +557,37 @@ model Supplier {
 }
 
 model PurchaseOrder {
-  id          String   @id @default(uuid())
-  supplierId  String
-  accountId   String
-  orderNumber String   @unique
-  status      String   @default("pending")
-  totalAmount Decimal  @default(0)
-  orderDate   DateTime @default(now())
-  expectedDate DateTime?
-  receivedDate DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                    String   @id @default(uuid())
+  supplierId            String
+  accountId             String
+  marketplaceId         String?
+  poNumber              String   @unique
+  status                String   @default("pending") // pending, in-transit, received, canceled
+  estimatedDeliveryDate DateTime?
+  totalQuantity         Int      @default(0)
+  totalCost             Decimal  @default(0)
+  orderDate             DateTime @default(now())
+  receivedDate          DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   // Relations
-  supplier    Supplier @relation(fields: [supplierId], references: [id])
-  items       PurchaseOrderItem[]
+  supplier      Supplier      @relation(fields: [supplierId], references: [id])
+  marketplace   Marketplace?  @relation(fields: [marketplaceId], references: [id], onDelete: SetNull)
+  items         PurchaseOrderItem[]
+  inboundShipments InboundShipment[]
 
   @@index([supplierId])
   @@index([accountId])
+  @@index([marketplaceId])
   @@map("purchase_orders")
 }
 
 model PurchaseOrderItem {
   id              String   @id @default(uuid())
   purchaseOrderId String
-  productId       String
+  productId       String?
+  sku             String
   quantity        Int
   unitCost        Decimal
   totalCost       Decimal
@@ -378,11 +595,30 @@ model PurchaseOrderItem {
 
   // Relations
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
-  product         Product       @relation(fields: [productId], references: [id])
+  product         Product?      @relation(fields: [productId], references: [id])
 
   @@index([purchaseOrderId])
   @@index([productId])
+  @@index([sku])
   @@map("purchase_order_items")
+}
+
+model InboundShipment {
+  id               String   @id @default(uuid())
+  purchaseOrderId  String
+  sku              String
+  quantityShipped  Int
+  quantityReceived Int      @default(0)
+  shipmentDate     DateTime @default(now())
+  receivedDate     DateTime?
+  status           String   @default("pending") // pending, in-transit, received
+
+  // Relations
+  purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseOrderId])
+  @@index([sku])
+  @@map("inbound_shipments")
 }
 
 // ============================================
@@ -411,6 +647,7 @@ model Order {
   items           OrderItem[]
   fees            Fee[]
   refunds         Refund[]
+  returns         Return[]
 
   @@index([accountId])
   @@index([orderId])
@@ -481,6 +718,33 @@ model Refund {
   @@map("refunds")
 }
 
+model Return {
+  id               String   @id @default(uuid())
+  orderId          String
+  sku              String
+  accountId        String
+  marketplaceId    String?
+  quantityReturned Int
+  reasonCode       String
+  refundAmount     Decimal
+  feeAmount        Decimal
+  isSellable       Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  account          Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace      Marketplace? @relation("MarketplaceReturns", fields: [marketplaceId], references: [id], onDelete: SetNull)
+
+  @@index([accountId])
+  @@index([sku])
+  @@index([reasonCode])
+  @@index([marketplaceId])
+  @@index([createdAt])
+  @@map("returns")
+}
+
 // ============================================
 // PPC & ADVERTISING
 // ============================================
@@ -523,8 +787,10 @@ model Expense {
   type          String   // 'fixed', 'recurring', 'one-time'
   category      String
   amount        Decimal
+  currency      String
+  allocatedProducts Json? // JSON array of { sku, percentage }
   description   String?
-  expenseDate   DateTime @default(now())
+  incurredAt    DateTime @default(now())
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -534,9 +800,10 @@ model Expense {
 
   @@index([accountId])
   @@index([marketplaceId])
-  @@index([expenseDate])
-  @@index([accountId, expenseDate])
+  @@index([incurredAt])
+  @@index([accountId, incurredAt])
   @@index([type])
+  @@index([category])
   @@map("expenses")
 }
 
@@ -563,22 +830,61 @@ model Cashflow {
 // COST OF GOODS SOLD (COGS)
 // ============================================
 
-model COGS {
+model Batch {
   id          String   @id @default(uuid())
-  accountId   String
   sku         String
-  cost        Decimal  // Cost per unit
-  quantity    Int      // Quantity purchased at this cost
-  purchaseDate DateTime @default(now())
+  accountId   String
+  quantity    Int
+  unitCost    Decimal
+  totalCost   Decimal
+  receivedAt  DateTime @default(now())
+  notes       String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   // Relations
   account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  cogs        COGS[]
 
   @@index([accountId])
   @@index([sku])
   @@index([accountId, sku])
+  @@index([receivedAt])
+  @@map("batches")
+}
+
+enum CostMethod {
+  BATCH
+  TIME_PERIOD
+  WEIGHTED_AVERAGE
+}
+
+model COGS {
+  id            String     @id @default(uuid())
+  sku           String
+  accountId     String
+  marketplaceId String?    // Links to Marketplace for accurate profit calculation
+  batchId       String?    // Optional link to Batch
+  quantity      Int
+  unitCost      Decimal    // Cost per unit
+  totalCost     Decimal    // Total cost (unitCost * quantity + shipmentCost)
+  costMethod    CostMethod @default(WEIGHTED_AVERAGE)
+  shipmentCost  Decimal?   // Optional inbound shipment cost
+  purchaseDate  DateTime   @default(now())
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  // Relations
+  account       Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace   Marketplace? @relation(fields: [marketplaceId], references: [id], onDelete: SetNull)
+  batch         Batch?     @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
+  @@index([accountId])
+  @@index([sku])
+  @@index([marketplaceId])
+  @@index([batchId])
+  @@index([accountId, sku])
+  @@index([accountId, sku, marketplaceId])
   @@index([purchaseDate])
   @@index([accountId, sku, purchaseDate])
   @@map("cogs")
@@ -628,6 +934,150 @@ model Reimbursement {
   @@map("reimbursements")
 }
 
+model FbaInventoryAlert {
+  id                String   @id @default(uuid())
+  userId            String
+  accountId         String?
+  marketplaceId     String
+  productId         String?
+  sku               String?
+  alertType         String   // 'lost' or 'damaged'
+  reportedQuantity  Int      @default(0)
+  reimbursedQuantity Int     @default(0)
+  estimatedAmount   Decimal  @default(0)
+  status            String   @default("pending") // 'pending', 'reimbursed', 'ignored', 'disputed'
+  notes             String?
+  detectedAt        DateTime @default(now())
+  resolvedAt        DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account           Account?     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace       Marketplace  @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+  product           Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([accountId])
+  @@index([marketplaceId])
+  @@index([productId])
+  @@index([sku])
+  @@index([alertType])
+  @@index([status])
+  @@index([detectedAt])
+  @@map("fba_inventory_alerts")
+}
+
+model RefundDiscrepancy {
+  id                  String   @id @default(uuid())
+  userId              String
+  accountId           String?
+  marketplaceId       String
+  productId           String?
+  sku                 String?
+  refundQuantity      Int      @default(0)
+  returnedQuantity    Int      @default(0)
+  unreimbursedAmount  Decimal  @default(0)
+  refundReasonCode    String?
+  status              String   @default("pending") // 'pending', 'reconciled', 'ignored'
+  detectedAt          DateTime @default(now())
+  resolvedAt          DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relations
+  user                User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account             Account?     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace         Marketplace  @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+  product             Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+  history             RefundDiscrepancyHistory[]
+
+  @@index([userId])
+  @@index([accountId])
+  @@index([marketplaceId])
+  @@index([productId])
+  @@index([sku])
+  @@index([status])
+  @@index([refundReasonCode])
+  @@index([detectedAt])
+  @@map("refund_discrepancies")
+}
+
+model RefundDiscrepancyHistory {
+  id                String   @id @default(uuid())
+  discrepancyId     String
+  userId            String
+  previousStatus    String?
+  newStatus         String
+  notes             String?
+  changedAt         DateTime @default(now())
+  metadata          Json?
+
+  // Relations
+  discrepancy       RefundDiscrepancy @relation(fields: [discrepancyId], references: [id], onDelete: Cascade)
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([discrepancyId])
+  @@index([userId])
+  @@index([changedAt])
+  @@map("refund_discrepancy_history")
+}
+
+model ReimbursementCase {
+  id               String   @id @default(uuid())
+  userId           String
+  accountId        String?
+  marketplaceId    String
+  productId        String?
+  sku              String?
+  caseType         String   // 'lost', 'damaged', 'refund_discrepancy'
+  generatedText    String
+  submissionStatus String   @default("draft") // 'draft', 'submitted', 'resolved'
+  submissionDate   DateTime?
+  resolutionDate   DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account          Account?     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace      Marketplace  @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+  product          Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+  history          CaseHistory[]
+
+  @@index([userId])
+  @@index([accountId])
+  @@index([marketplaceId])
+  @@index([productId])
+  @@index([sku])
+  @@index([caseType])
+  @@index([submissionStatus])
+  @@map("reimbursement_cases")
+}
+
+model CaseHistory {
+  id             String   @id @default(uuid())
+  caseId         String
+  userId         String
+  previousText   String?
+  newText        String?
+  previousStatus String?
+  newStatus      String?
+  notes          String?
+  changedAt      DateTime @default(now())
+  metadata       Json?
+
+  // Relations
+  case           ReimbursementCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([userId])
+  @@index([changedAt])
+  @@map("case_history")
+}
+
 // ============================================
 // REPORTS & ANALYTICS
 // ============================================
@@ -648,6 +1098,29 @@ model Report {
   @@index([userId])
   @@index([type])
   @@map("reports")
+}
+
+model ReportSchedule {
+  id              String   @id @default(uuid())
+  accountId       String
+  userId          String
+  reportType      String
+  filters         Json?
+  schedule        String   // daily, weekly, monthly
+  emailRecipients String[]
+  lastRunAt       DateTime?
+  nextRunAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([userId])
+  @@index([reportType])
+  @@map("report_schedules")
 }
 
 // ============================================
@@ -703,22 +1176,42 @@ model SyncLog {
 // ============================================
 
 model AmazonAccount {
-  id           String   @id @default(uuid())
-  userId       String
-  marketplace  String   // e.g. "US", "DE", "JP"
-  sellerId     String
-  accessKey    String   // Encrypted
-  secretKey    String   // Encrypted
-  refreshToken String   // Encrypted
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String   @id @default(uuid())
+  userId          String   // Internal user reference (seller_id)
+  amazonSellerId  String   // Amazon's seller ID (e.g., A1B2C3D4E5F6G7)
+  marketplace     String   // e.g. "US", "DE", "JP"
+  sellerId        String   // Legacy field, kept for backward compatibility (same as amazonSellerId)
+  
+  // LWA (Login with Amazon) Credentials
+  lwaClientId     String   // LWA Client ID (encrypted)
+  lwaClientSecret String   // LWA Client Secret (encrypted)
+  refreshToken    String   // LWA Refresh Token (encrypted) - NEVER expose to frontend
+  
+  // IAM Role for SP-API
+  iamRoleArn      String?  // AWS IAM Role ARN for assuming role (e.g., arn:aws:iam::123456789012:role/SP-API-Role)
+  
+  // Marketplace Configuration
+  marketplaceIds  String[] // Array of marketplace IDs this seller has access to (e.g., ["ATVPDKIKX0DER", "A2EUQ1WTGCTBG2"])
+  
+  // AWS Region
+  region          String   @default("us-east-1") // AWS region for SP-API calls (us-east-1, eu-west-1, etc.)
+  
+  // Legacy fields (kept for backward compatibility)
+  accessKey       String?  // Encrypted (deprecated, use IAM role instead)
+  secretKey       String?  // Encrypted (deprecated, use IAM role instead)
+  
+  // Status
+  isActive        Boolean  @default(true)
+  lastTokenRefreshAt DateTime? // Track when access token was last refreshed
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   // Relations
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   orders       AmazonOrder[]
   ppcMetrics   PPCMetric[]
   inventory    AmazonInventory[]
+  inventoryStock InventoryStock[]
   listingChanges ListingChange[]
   refunds      AmazonRefund[]
   syncLogs     SyncLog[]
@@ -727,10 +1220,13 @@ model AmazonAccount {
   inventoryImports InventoryImportStaging[]
   listingImports ListingImportStaging[]
   refundImports RefundImportStaging[]
+  userMarketplaces UserMarketplace[]
 
   @@unique([userId, marketplace]) // Ensure unique linkage per user/marketplace combination
   @@index([userId])
+  @@index([amazonSellerId])
   @@index([marketplace])
+  @@index([isActive])
   @@map("amazon_accounts")
 }
 
@@ -789,6 +1285,144 @@ model PPCMetric {
   @@map("ppc_metrics")
 }
 
+model PPCCampaign {
+  id           String   @id @default(uuid())
+  accountId    String
+  marketplaceId String?
+  campaignName String
+  status       String   @default("active")
+  totalSpend   Decimal  @default(0)
+  totalSales   Decimal  @default(0)
+  acos         Decimal  @default(0)
+  roi          Decimal  @default(0)
+  breakEvenAcos Decimal?
+  estimatedProfit Decimal? @default(0)
+  suggestedBid Decimal?
+  lastCalculatedAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  account      Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace  Marketplace? @relation(fields: [marketplaceId], references: [id], onDelete: SetNull)
+  adGroups     PPCAdGroup[]
+
+  @@index([accountId])
+  @@index([marketplaceId])
+  @@index([accountId, marketplaceId])
+  @@map("ppc_dashboard_campaigns")
+}
+
+model PPCAdGroup {
+  id           String   @id @default(uuid())
+  campaignId   String
+  accountId    String
+  marketplaceId String?
+  adGroupName  String
+  status       String   @default("active")
+  spend        Decimal  @default(0)
+  sales        Decimal  @default(0)
+  acos         Decimal  @default(0)
+  roi          Decimal  @default(0)
+  breakEvenAcos Decimal?
+  estimatedProfit Decimal? @default(0)
+  suggestedBid Decimal?
+  lastCalculatedAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  campaign     PPCCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  account      Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace  Marketplace? @relation(fields: [marketplaceId], references: [id], onDelete: SetNull)
+  keywords     PPCKeyword[]
+
+  @@index([campaignId])
+  @@index([accountId])
+  @@index([marketplaceId])
+  @@map("ppc_dashboard_ad_groups")
+}
+
+model PPCKeyword {
+  id           String   @id @default(uuid())
+  adGroupId    String
+  accountId    String
+  marketplaceId String?
+  keyword      String
+  matchType    String?
+  spend        Decimal  @default(0)
+  sales        Decimal  @default(0)
+  acos         Decimal  @default(0)
+  roi          Decimal  @default(0)
+  targetAcos   Decimal?
+  targetProfitability Decimal?
+  currentBid   Decimal  @default(0)
+  suggestedBid Decimal?
+  optimizationMode String @default("manual") // manual, autoplay
+  status       String   @default("active") // active, paused, negative
+  lastOptimizedAt DateTime?
+  pendingBulkUpdate Json?
+  lastBulkUpdatedAt DateTime?
+  breakEvenAcos Decimal?
+  estimatedProfit Decimal? @default(0)
+  lastCalculatedAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  adGroup      PPCAdGroup  @relation(fields: [adGroupId], references: [id], onDelete: Cascade)
+  account      Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace  Marketplace? @relation(fields: [marketplaceId], references: [id], onDelete: SetNull)
+  optimizationHistory PPCOptimizationHistory[]
+
+  @@index([adGroupId])
+  @@index([accountId])
+  @@index([marketplaceId])
+  @@index([keyword])
+  @@map("ppc_dashboard_keywords")
+}
+
+model PPCBulkHistory {
+  id         String   @id @default(uuid())
+  userId     String
+  accountId  String
+  targetType String
+  targetIds  Json
+  actionType String
+  oldValues  Json?
+  newValues  Json?
+  campaignId String?
+  adGroupId  String?
+  keywordId  String?
+  createdAt  DateTime @default(now())
+
+  // Relations
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account    Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([accountId])
+  @@index([campaignId])
+  @@index([adGroupId])
+  @@index([keywordId])
+  @@map("ppc_bulk_history")
+}
+
+model PPCOptimizationHistory {
+  id         String   @id @default(uuid())
+  keywordId  String
+  previousBid Decimal?
+  newBid     Decimal?
+  reason     String
+  createdAt  DateTime @default(now())
+
+  // Relations
+  keyword    PPCKeyword @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+
+  @@index([keywordId])
+  @@map("ppc_optimization_history")
+}
+
 model AmazonInventory {
   id            String   @id @default(uuid())
   sku           String
@@ -822,6 +1456,327 @@ model ListingChange {
   @@index([amazonAccountId])
   @@index([sku])
   @@map("listing_changes")
+}
+
+model ListingAlert {
+  id                   String   @id @default(uuid())
+  userId               String
+  marketplaceId        String
+  asin                 String
+  sku                  String?
+  previousTitle        String?
+  newTitle             String?
+  previousDescription  String?
+  newDescription       String?
+  previousImages       Json?
+  newImages            Json?
+  previousCategory     String?
+  newCategory          String?
+  newSellerDetected    Boolean  @default(false)
+  status               String   @default("unread") // unread, read, resolved
+  timestamp            DateTime @default(now())
+
+  // Relations
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketplace          Marketplace @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+
+  @@index([asin])
+  @@index([sku])
+  @@index([marketplaceId])
+  @@index([userId])
+  @@map("listing_alerts")
+}
+
+model ListingHistory {
+  id            String   @id @default(uuid())
+  marketplaceId String
+  asin          String
+  title         String?
+  description   String?
+  images        Json?
+  category      String?
+  sellers       Json?
+  capturedAt    DateTime @default(now())
+
+  // Relations
+  marketplace   Marketplace @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+
+  @@index([asin])
+  @@index([marketplaceId])
+  @@map("listing_history")
+}
+
+model BuyBoxAlert {
+  id                String   @id @default(uuid())
+  userId            String
+  marketplaceId     String
+  asin              String
+  sku               String?
+  lostBuyBox        Boolean  @default(false)
+  previousPrice     Decimal?
+  newPrice          Decimal?
+  competitorChanges Json?
+  status            String   @default("unread") // unread, read, resolved
+  timestamp         DateTime @default(now())
+
+  // Relations
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketplace       Marketplace @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+
+  @@index([asin])
+  @@index([sku])
+  @@index([marketplaceId])
+  @@index([userId])
+  @@map("buybox_alerts")
+}
+
+model BuyBoxHistory {
+  id            String   @id @default(uuid())
+  marketplaceId String
+  asin          String
+  sku           String?
+  buyBoxOwner   String?
+  price         Decimal?
+  competitorData Json?
+  capturedAt    DateTime @default(now())
+
+  // Relations
+  marketplace   Marketplace @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+
+  @@index([asin])
+  @@index([sku])
+  @@index([marketplaceId])
+  @@map("buybox_history")
+}
+
+model FeeChangeAlert {
+  id               String   @id @default(uuid())
+  userId           String
+  marketplaceId    String
+  productId        String?
+  sku              String?
+  feeType          String
+  previousFee      Decimal?
+  newFee           Decimal?
+  changePercentage Decimal?
+  status           String   @default("unread") // unread, read, resolved
+  timestamp        DateTime @default(now())
+
+  // Relations
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketplace      Marketplace @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+  product          Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([marketplaceId])
+  @@index([productId])
+  @@index([sku])
+  @@index([userId])
+  @@map("fee_change_alerts")
+}
+
+model FeeChangeHistory {
+  id            String   @id @default(uuid())
+  marketplaceId String
+  productId     String?
+  sku           String?
+  feeType       String
+  feeAmount     Decimal
+  capturedAt    DateTime @default(now())
+
+  // Relations
+  marketplace   Marketplace @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+  product       Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([marketplaceId])
+  @@index([productId])
+  @@index([sku])
+  @@map("fee_change_history")
+}
+
+model FeedbackReviewAlert {
+  id             String   @id @default(uuid())
+  userId         String
+  marketplaceId  String
+  asin           String?
+  productId      String?
+  sku            String?
+  previousRating Decimal?
+  newRating      Decimal?
+  reviewText     String?
+  reviewer       String?
+  status         String   @default("unread") // unread, read, resolved
+  timestamp      DateTime @default(now())
+
+  // Relations
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketplace    Marketplace @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+  product        Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([asin])
+  @@index([marketplaceId])
+  @@index([userId])
+  @@index([productId])
+  @@index([sku])
+  @@map("feedback_review_alerts")
+}
+
+model FeedbackReviewHistory {
+  id            String   @id @default(uuid())
+  marketplaceId String
+  asin          String?
+  productId     String?
+  sku           String?
+  rating        Decimal?
+  reviewText    String?
+  reviewer      String?
+  capturedAt    DateTime @default(now())
+
+  // Relations
+  marketplace   Marketplace @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+  product       Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([asin])
+  @@index([marketplaceId])
+  @@index([productId])
+  @@index([sku])
+  @@map("feedback_review_history")
+}
+
+model EmailTemplate {
+  id            String   @id @default(uuid())
+  userId        String
+  name          String
+  subject       String
+  body          String
+  variables     Json?
+  marketplaceId String?
+  productId     String?
+  sku           String?
+  purchaseType  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketplace   Marketplace? @relation(fields: [marketplaceId], references: [id], onDelete: SetNull)
+  product       Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+  queue         EmailQueue[]
+  schedulingRules SchedulingRule[]
+  reviewStats ReviewStats[]
+
+  @@index([userId])
+  @@index([marketplaceId])
+  @@index([productId])
+  @@map("email_templates")
+}
+
+model EmailQueue {
+  id             String   @id @default(uuid())
+  templateId     String
+  recipientEmail String
+  eventKey       String?
+  scheduledAt    DateTime
+  sentAt         DateTime?
+  status         String   @default("pending") // pending, sent, failed
+  openedCount    Int      @default(0)
+  clickedCount   Int      @default(0)
+  responseCount  Int      @default(0)
+  errorMessage   String?
+  payload        Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  template       EmailTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  interactions   EmailInteraction[]
+
+  @@index([templateId])
+  @@index([status])
+  @@index([eventKey])
+  @@map("email_queue")
+}
+
+model EmailInteraction {
+  id            String   @id @default(uuid())
+  emailQueueId  String
+  eventType     String   // 'open', 'click', 'bounce', 'delivered'
+  timestamp     DateTime @default(now())
+  metadata      Json?    // e.g., { clickedLink: 'https://...', userAgent: '...', ipAddress: '...' }
+  createdAt     DateTime @default(now())
+
+  // Relations
+  emailQueue    EmailQueue @relation(fields: [emailQueueId], references: [id], onDelete: Cascade)
+
+  @@index([emailQueueId])
+  @@index([eventType])
+  @@index([timestamp])
+  @@map("email_interactions")
+}
+
+model ReviewStats {
+  id                  String   @id @default(uuid())
+  templateId          String
+  userId              String
+  accountId           String?
+  marketplaceId       String?
+  productId           String?
+  asin                String?
+  sku                 String?
+  sentCount           Int      @default(0)
+  reviewReceivedCount Int      @default(0)
+  positiveReviews     Int      @default(0)
+  negativeReviews     Int      @default(0)
+  responseTimes       Json?    // { min: number, max: number, average: number } in hours
+  lastUpdated         DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relations
+  template            EmailTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account             Account?      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace         Marketplace?  @relation(fields: [marketplaceId], references: [id], onDelete: SetNull)
+  product             Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([templateId])
+  @@index([userId])
+  @@index([accountId])
+  @@index([marketplaceId])
+  @@index([productId])
+  @@index([asin])
+  @@index([sku])
+  @@unique([templateId, productId, asin, sku, accountId, marketplaceId])
+  @@map("review_stats")
+}
+
+model SchedulingRule {
+  id              String   @id @default(uuid())
+  templateId      String
+  userId          String
+  accountId       String?
+  marketplaceId   String?
+  productId       String?
+  sku             String?
+  deliveryDelayDays Int    @default(0) // Days to wait after delivery before sending
+  conditions      Json?   // JSON object with conditions: { firstTimeBuyer: true, notReturned: true, etc. }
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  template        EmailTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account         Account?     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplace     Marketplace? @relation(fields: [marketplaceId], references: [id], onDelete: SetNull)
+  product         Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([templateId])
+  @@index([userId])
+  @@index([accountId])
+  @@index([marketplaceId])
+  @@index([productId])
+  @@index([isActive])
+  @@map("scheduling_rules")
 }
 
 model AmazonRefund {
@@ -962,4 +1917,26 @@ model RefundImportStaging {
   @@index([status])
   @@index([createdAt])
   @@map("refund_import_staging")
+}
+
+// ============================================
+// OAUTH STATE (for CSRF protection)
+// ============================================
+
+model OAuthState {
+  id          String   @id @default(uuid())
+  userId      String   @map("userId")
+  state       String   @unique // CSRF token
+  redirectUri String   @map("redirectUri")
+  marketplace String?  // Optional marketplace filter
+  expiresAt   DateTime @map("expiresAt")
+  createdAt   DateTime @default(now()) @map("createdAt")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("oauth_states")
+  @@index([state])
+  @@index([userId])
+  @@index([expiresAt])
 }

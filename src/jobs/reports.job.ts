@@ -1,5 +1,6 @@
 import cron from 'node-cron'
 import { logger } from '../config/logger'
+import { processScheduledReports } from '../modules/reports/reports.scheduler'
 
 /**
  * Reports Generation Job
@@ -15,10 +16,7 @@ export function startReportsJob() {
     logger.info('Starting reports generation job...')
 
     try {
-      // TODO: Implement report generation logic
-      // 1. Get all scheduled reports
-      // 2. Generate reports
-      // 3. Send reports via email or store in database
+      await processScheduledReports()
 
       logger.info('Reports generation job completed')
     } catch (error) {

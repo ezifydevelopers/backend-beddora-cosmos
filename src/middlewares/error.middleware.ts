@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express'
 import { Prisma } from '@prisma/client'
 import { logger } from '../config/logger'
+import { sanitizeErrorForLogging, sanitizeSensitiveData } from '../utils/security.utils'
 
 /**
  * Custom error class for operational errors
@@ -38,12 +39,18 @@ export function errorHandler(
   res: Response,
   next: NextFunction
 ): void {
-  // Log error
+  // Log error with sanitized data (prevent sensitive data exposure)
+  const sanitizedError = sanitizeErrorForLogging(err)
   logger.error('Error occurred', {
-    error: err.message,
-    stack: err.stack,
+    error: sanitizedError.message,
+    stack: sanitizedError.stack,
+    code: sanitizedError.code,
+    name: sanitizedError.name,
     path: req.path,
     method: req.method,
+    // Sanitize query and body to prevent logging sensitive data
+    query: sanitizeSensitiveData(req.query),
+    body: sanitizeSensitiveData((req as any).body || {}),
   })
 
   // Handle AppError (operational errors)

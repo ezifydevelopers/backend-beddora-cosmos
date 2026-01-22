@@ -3,6 +3,8 @@ import { env } from './config/env'
 import { logger } from './config/logger'
 import { connectDb, disconnectDb } from './config/db'
 import { verifyEmailConfig } from './config/mail'
+import { initializeRedis, closeRedis } from './config/redis'
+import { runStartupValidations } from './config/startup-validation'
 import { startDataSyncJob } from './jobs/data-sync.job'
 import { startReportsJob } from './jobs/reports.job'
 import { startAlertsJob } from './jobs/alerts.job'
@@ -10,12 +12,20 @@ import { startAlertsJob } from './jobs/alerts.job'
 /**
  * Server entry point
  * Initializes database, email, and starts Express server
+ * 
+ * Implements fail-fast strategy for critical dependencies
  */
 
 async function startServer() {
   try {
+    // Run startup validations (fail-fast for critical issues)
+    await runStartupValidations()
+
     // Connect to database
     await connectDb()
+
+    // Initialize Redis (non-blocking, app works without it)
+    await initializeRedis()
 
     // Verify email configuration (non-blocking)
     await verifyEmailConfig()
@@ -39,6 +49,7 @@ async function startServer() {
     const shutdown = async () => {
       logger.info('Shutting down server...')
       server.close(async () => {
+        await closeRedis()
         await disconnectDb()
         process.exit(0)
       })

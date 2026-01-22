@@ -24,6 +24,7 @@ interface JWTPayload {
   email: string
   roles: string[]
   accountId?: string
+  activeAccountId?: string
 }
 
 /**
@@ -51,7 +52,8 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
         id: decoded.userId,
         email: decoded.email,
         roles: decoded.roles,
-        accountId: decoded.accountId,
+        // Support both legacy `accountId` and current `activeAccountId`
+        accountId: decoded.accountId || decoded.activeAccountId,
       }
       next()
     } catch (error) {

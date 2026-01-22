@@ -345,20 +345,59 @@ export async function linkAmazonAccount(
     )
   }
 
+  // Support both SP-API and legacy formats
+  // SP-API: lwaClientId/lwaClientSecret (preferred)
+  // Legacy: accessKey/secretKey (for backward compatibility)
+  const lwaClientId = data.lwaClientId || data.accessKey
+  const lwaClientSecret = data.lwaClientSecret || data.secretKey || '' // Optional for Application IDs
+  
+  if (!lwaClientId) {
+    throw new AppError('Missing required field: lwaClientId (App ID) or accessKey', 400)
+  }
+  
+  if (!data.refreshToken) {
+    throw new AppError('Missing required field: refreshToken', 400)
+  }
+
+  // Get default marketplace IDs based on marketplace code
+  const defaultMarketplaceIds: Record<string, string[]> = {
+    US: ['ATVPDKIKX0DER'],
+    UK: ['A1F83G8C2ARO7P'],
+    DE: ['A1PA6795UKMFR9'],
+    FR: ['A13V1IB3VIYZZH'],
+    IT: ['APJ6JRA9NG5V4'],
+    ES: ['A1RKKUPIHCS9HS'],
+    JP: ['A1VC38T7YXB528'],
+    CA: ['A2EUQ1WTGCTBG2'],
+    MX: ['A1AM78C64UM0Y8'],
+    AU: ['A39IBJ37TRP1C6'],
+    IN: ['A21TJRUUN4KGV'],
+  }
+  
+  const marketplaceIds = data.marketplaceIds || defaultMarketplaceIds[marketplace] || []
+  const region = data.region || 'us-east-1'
+
   // Encrypt sensitive credentials
-  const encryptedAccessKey = encrypt(data.accessKey)
-  const encryptedSecretKey = encrypt(data.secretKey)
+  const encryptedLwaClientId = encrypt(lwaClientId)
+  const encryptedLwaClientSecret = encrypt(lwaClientSecret)
   const encryptedRefreshToken = encrypt(data.refreshToken)
 
   // Create account with encrypted credentials
+  // Use SP-API fields (lwaClientId, lwaClientSecret) and also set legacy fields for compatibility
   const amazonAccount = await prisma.amazonAccount.create({
     data: {
       userId,
       marketplace,
-      sellerId: data.sellerId.trim(),
-      accessKey: encryptedAccessKey,
-      secretKey: encryptedSecretKey,
+      amazonSellerId: data.sellerId.trim(),
+      sellerId: data.sellerId.trim(), // Legacy field
+      lwaClientId: encryptedLwaClientId,
+      lwaClientSecret: encryptedLwaClientSecret,
       refreshToken: encryptedRefreshToken,
+      accessKey: encryptedLwaClientId, // Legacy field (same as lwaClientId)
+      secretKey: encryptedLwaClientSecret, // Legacy field (same as lwaClientSecret)
+      iamRoleArn: data.iamRoleArn || null,
+      marketplaceIds: marketplaceIds,
+      region: region,
       isActive: true,
     },
   })
@@ -621,9 +660,14 @@ export async function getAmazonAccountCredentials(
     throw new AppError('Amazon account is inactive', 400)
   }
 
+  // Decrypt credentials (legacy fields - accessKey/secretKey may be null)
+  // For SP-API, use lwaClientId/lwaClientSecret instead
+  const accessKey = account.accessKey ? decrypt(account.accessKey) : ''
+  const secretKey = account.secretKey ? decrypt(account.secretKey) : ''
+
   return {
-    accessKey: decrypt(account.accessKey),
-    secretKey: decrypt(account.secretKey),
+    accessKey,
+    secretKey,
     refreshToken: decrypt(account.refreshToken),
     marketplace: account.marketplace,
     sellerId: account.sellerId,

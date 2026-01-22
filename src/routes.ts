@@ -3,21 +3,29 @@ import { Router } from 'express'
 // Import all route modules
 import authRoutes from './modules/auth/auth.routes'
 import usersRoutes from './modules/users/users.routes'
+import multiMarketplaceRoutes from './modules/multi-marketplace/marketplace.routes'
 import accountsRoutes from './modules/accounts/accounts.routes'
 import permissionsRoutes from './modules/permissions/permissions.routes'
 import marketplacesRoutes from './modules/marketplaces/marketplaces.routes'
 import profitRoutes from './modules/profit/profit.routes'
 import inventoryRoutes from './modules/inventory/inventory.routes'
+import purchaseOrderRoutes from './modules/inventory/purchase-orders/po.routes'
+import inboundShipmentRoutes from './modules/inventory/purchase-orders/inbound.routes'
 import expensesRoutes from './modules/expenses/expenses.routes'
 import cashflowRoutes from './modules/cashflow/cashflow.routes'
 import ppcRoutes from './modules/ppc/ppc.routes'
 import alertsRoutes from './modules/alerts/alerts.routes'
 import autoresponderRoutes from './modules/autoresponder/autoresponder.routes'
+import emailRoutes from './modules/autoresponder/emails/email.routes'
+import schedulingRulesRoutes from './modules/autoresponder/scheduling-rules/schedulingRule.routes'
+import trackingStatsRoutes from './modules/autoresponder/tracking-stats/tracking.routes'
 import reimbursementsRoutes from './modules/reimbursements/reimbursements.routes'
 import reportsRoutes from './modules/reports/reports.routes'
 import adminRoutes from './modules/admin/admin.routes'
 import amazonRoutes from './modules/amazon/amazon.routes'
 import manualImportRoutes from './modules/manual-import/import.routes'
+import dashboardRoutes from './modules/dashboard/dashboard.routes'
+import currencyRoutes from './modules/multi-currency/currency.routes'
 
 /**
  * Central route registration
@@ -31,8 +39,14 @@ import manualImportRoutes from './modules/manual-import/import.routes'
 export function registerRoutes(): Router {
   const router = Router()
 
+  // Dashboard routes
+  router.use('/dashboard', dashboardRoutes)
+
   // Authentication routes
   router.use('/auth', authRoutes)
+
+  // Multi-marketplace routes (user-linked marketplaces)
+  router.use('/', multiMarketplaceRoutes)
 
   // User management routes
   router.use('/users', usersRoutes)
@@ -51,6 +65,8 @@ export function registerRoutes(): Router {
 
   // Inventory routes
   router.use('/inventory', inventoryRoutes)
+  router.use('/purchase-orders', purchaseOrderRoutes)
+  router.use('/inbound-shipments', inboundShipmentRoutes)
 
   // Expenses routes
   router.use('/expenses', expensesRoutes)
@@ -66,6 +82,9 @@ export function registerRoutes(): Router {
 
   // Autoresponder routes
   router.use('/autoresponder', autoresponderRoutes)
+  router.use('/emails', emailRoutes)
+  router.use('/scheduling-rules', schedulingRulesRoutes)
+  router.use('/tracking', trackingStatsRoutes)
 
   // Reimbursements routes
   router.use('/reimbursements', reimbursementsRoutes)
@@ -81,6 +100,9 @@ export function registerRoutes(): Router {
 
   // Manual import routes
   router.use('/import', manualImportRoutes)
+
+  // Multi-currency routes
+  router.use('/currencies', currencyRoutes)
 
   return router
 }

@@ -236,53 +236,43 @@ export async function getReturnsCostKPI(
 
   const dateFilter = buildDateFilter(startDate, endDate)
 
-  // Build where clause for orders
-  const orderWhere: any = {}
-  if (accountId) orderWhere.accountId = accountId
-  if (marketplaceId) orderWhere.marketplaceId = marketplaceId
-  if (dateFilter) orderWhere.orderDate = dateFilter
+  const returnWhere: any = {}
+  if (accountId) returnWhere.accountId = accountId
+  if (marketplaceId) returnWhere.marketplaceId = marketplaceId
+  if (sku) returnWhere.sku = sku
+  if (dateFilter) returnWhere.createdAt = dateFilter
 
-  // Get refunds
-  const refunds = await prisma.refund.findMany({
-    where: {
-      ...(dateFilter ? { createdAt: dateFilter } : {}),
-      order: orderWhere,
-    },
-    include: {
-      order: {
-        include: {
-          items: sku
-            ? {
-                where: { sku },
-                include: {
-                  product: {
-                    select: {
-                      id: true,
-                      title: true,
-                    },
-                  },
-                },
-              }
-            : {
-                include: {
-                  product: {
-                    select: {
-                      id: true,
-                      title: true,
-                    },
-                  },
-                },
-              },
-          marketplaceRef: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-      },
-    },
+  const returns = await prisma.return.findMany({
+    where: returnWhere,
   })
+
+  const uniqueSkus = Array.from(new Set(returns.map((entry) => entry.sku)))
+  const products = uniqueSkus.length
+    ? await prisma.product.findMany({
+        where: {
+          sku: { in: uniqueSkus },
+          ...(accountId ? { accountId } : {}),
+        },
+        select: {
+          id: true,
+          sku: true,
+          title: true,
+        },
+      })
+    : []
+
+  const productMap = new Map(products.map((product) => [product.sku, product]))
+
+  const marketplaceIds = Array.from(
+    new Set(returns.map((entry) => entry.marketplaceId).filter(Boolean) as string[])
+  )
+  const marketplaces = marketplaceIds.length
+    ? await prisma.marketplace.findMany({
+        where: { id: { in: marketplaceIds } },
+        select: { id: true, name: true },
+      })
+    : []
+  const marketplaceMap = new Map(marketplaces.map((mp) => [mp.id, mp.name]))
 
   // Aggregate by reason code, SKU, and marketplace
   const breakdownMap = new Map<string, {
@@ -297,37 +287,27 @@ export async function getReturnsCostKPI(
     count: number
   }>()
 
-  for (const refund of refunds) {
-    // If filtering by SKU, only include refunds for orders with that SKU
-    if (sku && !refund.order.items.some((item) => item.sku === sku)) {
-      continue
+  for (const entry of returns) {
+    const key = `${entry.reasonCode || 'unknown'}-${entry.sku}-${entry.marketplaceId || 'unknown'}`
+    const product = productMap.get(entry.sku)
+
+    if (!breakdownMap.has(key)) {
+      breakdownMap.set(key, {
+        reasonCode: entry.reasonCode || null,
+        reason: entry.reasonCode || null,
+        sku: entry.sku,
+        productId: product?.id || undefined,
+        productTitle: product?.title || undefined,
+        marketplaceId: entry.marketplaceId || undefined,
+        marketplaceName: entry.marketplaceId ? marketplaceMap.get(entry.marketplaceId) : undefined,
+        amount: 0,
+        count: 0,
+      })
     }
 
-    // For each SKU in the order, create a breakdown entry
-    for (const item of refund.order.items) {
-      const key = `${refund.reasonCode || 'unknown'}-${item.sku}-${refund.order.marketplaceId || 'unknown'}`
-
-      if (!breakdownMap.has(key)) {
-        breakdownMap.set(key, {
-          reasonCode: refund.reasonCode || null,
-          reason: refund.reason || null,
-          sku: item.sku,
-          productId: item.product?.id || undefined,
-          productTitle: item.product?.title || undefined,
-          marketplaceId: refund.order.marketplaceId || undefined,
-          marketplaceName: refund.order.marketplaceRef?.name || undefined,
-          amount: 0,
-          count: 0,
-        })
-      }
-
-      const entry = breakdownMap.get(key)!
-      // Allocate refund proportionally to item value
-      const orderTotal = Number(refund.order.totalAmount)
-      const itemProportion = orderTotal > 0 ? Number(item.totalPrice) / orderTotal : 1
-      entry.amount += Number(refund.amount) * itemProportion
-      entry.count += 1
-    }
+    const breakdown = breakdownMap.get(key)!
+    breakdown.amount += Number(entry.refundAmount) + Number(entry.feeAmount)
+    breakdown.count += entry.quantityReturned
   }
 
   const breakdown = Array.from(breakdownMap.values())
@@ -635,8 +615,23 @@ export async function getPayoutEstimateKPI(
 
   const refunds = Number(refundsAggregation._sum.amount || 0)
 
-  // Get returns cost (same as refunds for now)
-  const returnsCost = refunds
+  // Get returns cost (refunds + fees from returns table)
+  const returnsAggregation = await prisma.return.aggregate({
+    where: {
+      accountId: accountId || undefined,
+      marketplaceId: marketplaceId || undefined,
+      ...(sku ? { sku } : {}),
+      ...(dateFilter ? { createdAt: dateFilter } : {}),
+    },
+    _sum: {
+      refundAmount: true,
+      feeAmount: true,
+    },
+  })
+
+  const returnsCost =
+    Number(returnsAggregation._sum.refundAmount || 0) +
+    Number(returnsAggregation._sum.feeAmount || 0)
 
   // Get advertising costs (PPC)
   const ppcWhere: any = {}
@@ -656,7 +651,7 @@ export async function getPayoutEstimateKPI(
   const otherFees = totalFees - fbaFees
 
   // Calculate total deductions
-  const totalDeductions = totalFees + refunds + advertising
+  const totalDeductions = totalFees + refunds + returnsCost + advertising
 
   // Calculate estimated payout
   const estimatedPayout = grossRevenue - totalDeductions

@@ -17,31 +17,31 @@ export function startDataSyncJob() {
     logger.info('Starting data sync job...')
 
     try {
-      // Get all active accounts
-      const accounts = await prisma.account.findMany({
+      // Get all active Amazon accounts (linked Seller Central accounts)
+      const amazonAccounts = await prisma.amazonAccount.findMany({
         where: { isActive: true },
       })
 
-      // Sync data for each account
-      for (const account of accounts) {
+      // Sync data for each Amazon account
+      for (const amazonAccount of amazonAccounts) {
         try {
-          logger.info(`Syncing data for account: ${account.id}`)
+          logger.info(`Syncing data for Amazon account: ${amazonAccount.id} (user: ${amazonAccount.userId})`)
 
           // Sync orders
-          await syncService.syncOrders(account.id)
+          await syncService.syncOrders(amazonAccount.userId, amazonAccount.id)
 
-          // Sync products
-          await syncService.syncProducts(account.id)
+          // Sync listings (products)
+          await syncService.syncListings(amazonAccount.userId, amazonAccount.id)
 
           // Sync inventory
-          await syncService.syncInventory(account.id)
+          await syncService.syncInventory(amazonAccount.userId, amazonAccount.id)
 
           // Sync PPC campaigns
-          await syncService.syncPPCCampaigns(account.id)
+          await syncService.syncPPC(amazonAccount.userId, amazonAccount.id)
 
-          logger.info(`Completed sync for account: ${account.id}`)
+          logger.info(`Completed sync for Amazon account: ${amazonAccount.id}`)
         } catch (error) {
-          logger.error(`Failed to sync account ${account.id}`, error)
+          logger.error(`Failed to sync Amazon account ${amazonAccount.id}`, error)
           // Continue with next account
         }
       }
