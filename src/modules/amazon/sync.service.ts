@@ -4,6 +4,7 @@ import { logger } from '../../config/logger'
 import { decrypt } from '../../utils/encryption'
 import { AppError } from '../../middlewares/error.middleware'
 import * as accountsService from '../accounts/accounts.service'
+import * as transformers from './transformers'
 
 /**
  * Amazon Sync Service
@@ -253,7 +254,7 @@ export async function syncOrders(
         }
 
         // Upsert order
-        await prisma.amazonOrder.upsert({
+        const amazonOrder = await prisma.amazonOrder.upsert({
           where: { orderId: order.AmazonOrderId },
           update: {
             status: order.OrderStatus,
@@ -270,6 +271,73 @@ export async function syncOrders(
             fees: fees,
           },
         })
+
+        // Store order items using transformer
+        if (orderItems.length > 0) {
+          const transformedItems = transformers.transformOrderItems(orderItems, order.AmazonOrderId || '')
+          
+          for (const transformedItem of transformedItems) {
+            try {
+              // Upsert order item
+              await prisma.amazonOrderItem.upsert({
+                where: {
+                  amazonOrderId_orderItemId: {
+                    amazonOrderId: amazonOrder.id,
+                    orderItemId: transformedItem.orderItemId,
+                  },
+                },
+                update: {
+                  asin: transformedItem.asin,
+                  sellerSku: transformedItem.sellerSku,
+                  title: transformedItem.title,
+                  quantityOrdered: transformedItem.quantityOrdered,
+                  quantityShipped: transformedItem.quantityShipped,
+                  itemPrice: transformedItem.itemPrice,
+                  itemTax: transformedItem.itemTax,
+                  shippingPrice: transformedItem.shippingPrice,
+                  shippingTax: transformedItem.shippingTax,
+                  giftWrapPrice: transformedItem.giftWrapPrice,
+                  giftWrapTax: transformedItem.giftWrapTax,
+                  itemPromotionDiscount: transformedItem.itemPromotionDiscount,
+                  shippingPromotionDiscount: transformedItem.shippingPromotionDiscount,
+                  codFee: transformedItem.codFee,
+                  codFeeDiscount: transformedItem.codFeeDiscount,
+                  currency: transformedItem.currency,
+                  productInfo: transformedItem.productInfo,
+                  updatedAt: new Date(),
+                },
+                create: {
+                  amazonOrderId: amazonOrder.id,
+                  orderItemId: transformedItem.orderItemId,
+                  asin: transformedItem.asin,
+                  sellerSku: transformedItem.sellerSku,
+                  title: transformedItem.title,
+                  quantityOrdered: transformedItem.quantityOrdered,
+                  quantityShipped: transformedItem.quantityShipped,
+                  itemPrice: transformedItem.itemPrice,
+                  itemTax: transformedItem.itemTax,
+                  shippingPrice: transformedItem.shippingPrice,
+                  shippingTax: transformedItem.shippingTax,
+                  giftWrapPrice: transformedItem.giftWrapPrice,
+                  giftWrapTax: transformedItem.giftWrapTax,
+                  itemPromotionDiscount: transformedItem.itemPromotionDiscount,
+                  shippingPromotionDiscount: transformedItem.shippingPromotionDiscount,
+                  codFee: transformedItem.codFee,
+                  codFeeDiscount: transformedItem.codFeeDiscount,
+                  currency: transformedItem.currency,
+                  productInfo: transformedItem.productInfo,
+                },
+              })
+            } catch (itemError: any) {
+              logger.warn('Failed to store order item', {
+                orderId: order.AmazonOrderId,
+                item: transformedItem.orderItemId,
+                error: itemError.message,
+              })
+              // Continue with other items even if one fails
+            }
+          }
+        }
 
         recordsSynced++
       } catch (error: any) {

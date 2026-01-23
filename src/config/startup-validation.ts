@@ -13,7 +13,7 @@
 
 import { env } from './env'
 import { logger } from './logger'
-import { isRedisAvailable } from './redis'
+import { isRedisConnected } from './redis'
 import { AppError } from '../middlewares/error.middleware'
 
 /**
@@ -49,12 +49,14 @@ export function validateEncryptionKey(): void {
 /**
  * Validate Redis connection (if enabled)
  * 
- * Redis is critical for:
+ * Redis is recommended for:
  * - Token caching (prevents excessive API calls)
  * - Distributed locking (prevents concurrent token refresh)
  * - Rate limiting (distributed rate limiting)
  * 
- * If Redis is enabled but not reachable, fail fast.
+ * Note: Redis is optional - app works with in-memory fallback.
+ * If Redis is enabled but not reachable, log warning but don't fail.
+ * In production, you should ensure Redis is available for scalability.
  */
 export async function validateRedisConnection(): Promise<void> {
   if (!env.redisEnabled) {
@@ -65,14 +67,17 @@ export async function validateRedisConnection(): Promise<void> {
   // Wait a bit for Redis to connect (if async initialization)
   await new Promise((resolve) => setTimeout(resolve, 1000))
 
-  if (!isRedisAvailable()) {
-    logger.error('CRITICAL: Redis is enabled but not reachable', {
+  if (!isRedisConnected()) {
+    logger.warn('⚠️  Redis is enabled but not reachable - using in-memory fallback', {
       redisUrl: env.redisUrl || `${env.redisHost}:${env.redisPort}`,
+      note: 'App will continue with in-memory caching. For production, ensure Redis is available.',
     })
-    throw new AppError(
-      'CRITICAL: Redis is enabled but not reachable. Please check Redis connection or disable Redis.',
-      500
-    )
+    // Don't throw error - app can work without Redis using in-memory fallback
+    // In production, you might want to make this stricter
+    if (env.nodeEnv === 'production') {
+      logger.warn('⚠️  Production environment detected - Redis is recommended for scalability')
+    }
+    return
   }
 
   logger.info('✅ Redis connection validated')

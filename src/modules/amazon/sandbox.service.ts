@@ -148,12 +148,8 @@ async function getSandboxCredentialsFromDB(
   userId: string
 ): Promise<{ credentials: LWACredentials; region: string }> {
   // Get account from database (with decrypted credentials)
-  const account = await getAmazonAccount(amazonAccountId, true) // includeDecrypted = true
-
-  // Verify user owns this account
-  if (account.userId !== userId) {
-    throw new AppError('Unauthorized to access this Amazon account', 403)
-  }
+  // SECURITY: getAmazonAccount now verifies userId ownership internally
+  const account = await getAmazonAccount(amazonAccountId, userId, true) // includeDecrypted = true
 
   // Verify account is active
   if (!account.isActive) {
@@ -414,7 +410,8 @@ export async function testSandboxConnection(
       credentials = dbCredentials.credentials
       region = dbCredentials.region
 
-      const account = await getAmazonAccount(amazonAccountId, false) // Don't need decrypted for basic info
+      // SECURITY: getAmazonAccount now verifies userId ownership internally
+      const account = await getAmazonAccount(amazonAccountId, userId, false) // Don't need decrypted for basic info
       const accountWithNewFields = account as any
       accountInfo = {
         amazonSellerId: accountWithNewFields.amazonSellerId || accountWithNewFields.sellerId,

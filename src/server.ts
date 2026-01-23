@@ -5,9 +5,11 @@ import { connectDb, disconnectDb } from './config/db'
 import { verifyEmailConfig } from './config/mail'
 import { initializeRedis, closeRedis } from './config/redis'
 import { runStartupValidations } from './config/startup-validation'
-import { startDataSyncJob } from './jobs/data-sync.job'
-import { startReportsJob } from './jobs/reports.job'
-import { startAlertsJob } from './jobs/alerts.job'
+import { initializeQueues, closeQueues } from './config/queue'
+import { initializeWorkers } from './jobs/workers'
+import { initializeDataSyncScheduler, closeDataSyncScheduler } from './jobs/schedulers/data-sync.scheduler'
+import { initializeReportsScheduler } from './jobs/schedulers/reports.scheduler'
+import { initializeAlertsScheduler } from './jobs/schedulers/alerts.scheduler'
 
 /**
  * Server entry point
@@ -27,13 +29,19 @@ async function startServer() {
     // Initialize Redis (non-blocking, app works without it)
     await initializeRedis()
 
+    // Initialize queue system (requires Redis)
+    await initializeQueues()
+
+    // Initialize workers (process jobs)
+    initializeWorkers()
+
+    // Initialize schedulers (schedule recurring jobs)
+    await initializeDataSyncScheduler()
+    await initializeReportsScheduler()
+    await initializeAlertsScheduler()
+
     // Verify email configuration (non-blocking)
     await verifyEmailConfig()
-
-    // Start background jobs
-    startDataSyncJob()
-    startReportsJob()
-    startAlertsJob()
 
     // Create Express app
     const app = createApp()
@@ -49,6 +57,9 @@ async function startServer() {
     const shutdown = async () => {
       logger.info('Shutting down server...')
       server.close(async () => {
+        // Close queues and workers first (let current jobs finish)
+        await closeDataSyncScheduler()
+        await closeQueues()
         await closeRedis()
         await disconnectDb()
         process.exit(0)

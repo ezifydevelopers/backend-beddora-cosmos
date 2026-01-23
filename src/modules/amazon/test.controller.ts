@@ -66,15 +66,8 @@ export async function testOrdersAPI(
       return
     }
 
-    // Verify account belongs to user
-    const account = await getAmazonAccount(amazonAccountId, false)
-    if (account.userId !== req.userId) {
-      res.status(403).json({
-        success: false,
-        error: 'Unauthorized to access this Amazon account',
-      })
-      return
-    }
+    // Verify account belongs to user (getAmazonAccount now verifies ownership internally)
+    const account = await getAmazonAccount(amazonAccountId, req.userId, false)
 
     logger.info('Testing SP-API Orders endpoint', {
       userId: req.userId,
@@ -168,15 +161,8 @@ export async function testStatus(
       return
     }
 
-    // Verify account belongs to user
-    const account = await getAmazonAccount(amazonAccountId, false)
-    if (account.userId !== req.userId) {
-      res.status(403).json({
-        success: false,
-        error: 'Unauthorized to access this Amazon account',
-      })
-      return
-    }
+    // Verify account belongs to user (getAmazonAccount now verifies ownership internally)
+    const account = await getAmazonAccount(amazonAccountId, req.userId, false)
 
     logger.info('Testing SP-API status', {
       userId: req.userId,

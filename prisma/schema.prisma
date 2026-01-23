@@ -59,6 +59,7 @@ model User {
   caseHistory CaseHistory[]
   userMarketplaces UserMarketplace[]
   oauthStates OAuthState[]
+  syncSchedules SyncSchedule[]
 
   @@index([email])
   @@map("users")
@@ -1249,10 +1250,46 @@ model AmazonOrder {
 
   // Relations
   amazonAccount AmazonAccount @relation(fields: [amazonAccountId], references: [id], onDelete: Cascade)
+  items         AmazonOrderItem[]
 
   @@index([amazonAccountId])
   @@index([orderId])
   @@map("amazon_orders")
+}
+
+model AmazonOrderItem {
+  id              String   @id @default(uuid())
+  amazonOrderId   String   // Links to AmazonOrder.id
+  orderItemId     String?  // Amazon's order item ID (OrderItemId from SP-API)
+  asin            String?  // Product ASIN
+  sellerSku       String?  // Seller SKU
+  title           String?  // Product title
+  quantityOrdered Int      @default(1)
+  quantityShipped Int?     // Quantity shipped (may be null if not shipped yet)
+  itemPrice       Decimal? // Unit price
+  itemTax         Decimal? // Tax per item
+  shippingPrice   Decimal? // Shipping price
+  shippingTax     Decimal? // Shipping tax
+  giftWrapPrice   Decimal? // Gift wrap price
+  giftWrapTax     Decimal? // Gift wrap tax
+  itemPromotionDiscount Decimal? // Promotion discount
+  shippingPromotionDiscount Decimal? // Shipping promotion discount
+  codFee          Decimal? // COD fee
+  codFeeDiscount  Decimal? // COD fee discount
+  currency        String?  // Currency code
+  productInfo     Json?    // Additional product information (condition, gift message, etc.)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  amazonOrder     AmazonOrder @relation(fields: [amazonOrderId], references: [id], onDelete: Cascade)
+
+  @@index([amazonOrderId])
+  @@index([asin])
+  @@index([sellerSku])
+  @@index([orderItemId])
+  @@unique([amazonOrderId, orderItemId]) // Ensure unique order item per order
+  @@map("amazon_order_items")
 }
 
 model PPCMetric {
@@ -1939,4 +1976,33 @@ model OAuthState {
   @@index([state])
   @@index([userId])
   @@index([expiresAt])
+}
+
+// ============================================
+// SYNC SCHEDULES (per-account sync configuration)
+// ============================================
+
+model SyncSchedule {
+  id              String   @id @default(uuid())
+  amazonAccountId String
+  userId          String
+  syncType        String   // 'orders', 'fees', 'ppc', 'inventory', 'listings', 'refunds'
+  intervalMinutes Int      @default(60) // Sync interval in minutes (0 = disabled)
+  enabled         Boolean  @default(true)
+  lastRunAt       DateTime? // Last time this sync type ran
+  nextRunAt       DateTime? // Next scheduled run time
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  amazonAccount   AmazonAccount @relation(fields: [amazonAccountId], references: [id], onDelete: Cascade)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([amazonAccountId, syncType]) // One schedule per account per sync type
+  @@index([amazonAccountId])
+  @@index([userId])
+  @@index([enabled])
+  @@index([nextRunAt])
+  @@index([enabled, nextRunAt])
+  @@map("sync_schedules")
 }

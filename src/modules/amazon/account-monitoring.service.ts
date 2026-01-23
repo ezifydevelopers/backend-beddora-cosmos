@@ -36,10 +36,16 @@ export enum AccountStatus {
  * 
  * Verifies that the account can still make SP-API calls.
  * 
+ * SECURITY: Verifies userId ownership to prevent unauthorized status checks.
+ * 
  * @param amazonAccountId - Amazon account ID
+ * @param userId - User ID (required for security - verifies ownership)
  * @returns Account status and last check time
  */
-export async function checkAccountStatus(amazonAccountId: string): Promise<{
+export async function checkAccountStatus(
+  amazonAccountId: string,
+  userId: string
+): Promise<{
   status: AccountStatus
   lastChecked: Date
   error?: string
@@ -51,6 +57,11 @@ export async function checkAccountStatus(amazonAccountId: string): Promise<{
 
     if (!account) {
       throw new AppError('Amazon account not found', 404)
+    }
+
+    // CRITICAL: Verify ownership to prevent unauthorized status checks
+    if (account.userId !== userId) {
+      throw new AppError('Unauthorized to check this account', 403)
     }
 
     if (!account.isActive) {
@@ -228,9 +239,13 @@ export async function monitorAllAccounts(userId?: string): Promise<{
  * 
  * Specifically checks for revoked tokens and marks accounts as inactive.
  * 
+ * SECURITY: Filters by userId if provided to prevent accessing all accounts.
+ * If userId is not provided, this should only be called by admin/system processes.
+ * 
+ * @param userId - Optional: filter to specific user's accounts (recommended for security)
  * @returns List of revoked accounts
  */
-export async function detectRevokedTokens(): Promise<Array<{
+export async function detectRevokedTokens(userId?: string): Promise<Array<{
   amazonAccountId: string
   userId: string
   amazonSellerId: string
@@ -241,8 +256,14 @@ export async function detectRevokedTokens(): Promise<Array<{
     amazonSellerId: string
   }> = []
 
+  // CRITICAL: Filter by userId if provided to prevent accessing all accounts
+  const where: any = { isActive: true }
+  if (userId) {
+    where.userId = userId
+  }
+
   const accounts = await prisma.amazonAccount.findMany({
-    where: { isActive: true },
+    where,
     select: {
       id: true,
       userId: true,
@@ -251,7 +272,8 @@ export async function detectRevokedTokens(): Promise<Array<{
   })
 
   for (const account of accounts) {
-    const status = await checkAccountStatus(account.id)
+    // SECURITY: Pass userId to verify ownership
+    const status = await checkAccountStatus(account.id, account.userId)
 
     if (status.status === AccountStatus.REVOKED) {
       revokedAccounts.push({

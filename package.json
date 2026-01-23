@@ -30,6 +30,7 @@
     "@types/multer": "^2.0.0",
     "axios": "^1.6.2",
     "bcryptjs": "^2.4.3",
+    "bullmq": "^5.66.7",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "csv-parse": "^6.1.0",

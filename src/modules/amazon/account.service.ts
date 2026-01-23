@@ -156,17 +156,29 @@ export async function upsertAmazonAccount(input: CreateAmazonAccountInput) {
 /**
  * Get Amazon account by ID
  * 
+ * SECURITY: Verifies userId ownership to prevent data leakage between sellers.
+ * 
  * @param accountId - AmazonAccount ID
+ * @param userId - User ID (required for security - verifies ownership)
  * @param includeDecrypted - If true, returns decrypted credentials (use with caution)
  * @returns AmazonAccount (credentials encrypted unless includeDecrypted is true)
  */
-export async function getAmazonAccount(accountId: string, includeDecrypted: boolean = false) {
+export async function getAmazonAccount(
+  accountId: string,
+  userId: string,
+  includeDecrypted: boolean = false
+) {
   const account = await prisma.amazonAccount.findUnique({
     where: { id: accountId },
   })
 
   if (!account) {
     throw new AppError('Amazon account not found', 404)
+  }
+
+  // CRITICAL: Verify ownership to prevent data leakage
+  if (account.userId !== userId) {
+    throw new AppError('Unauthorized to access this account', 403)
   }
 
   if (includeDecrypted) {
@@ -217,17 +229,29 @@ export async function getUserAmazonAccounts(userId: string) {
 /**
  * Update Amazon account
  * 
+ * SECURITY: Verifies userId ownership to prevent unauthorized updates.
+ * 
  * @param accountId - AmazonAccount ID
+ * @param userId - User ID (required for security - verifies ownership)
  * @param input - Fields to update
  * @returns Updated AmazonAccount
  */
-export async function updateAmazonAccount(accountId: string, input: UpdateAmazonAccountInput) {
+export async function updateAmazonAccount(
+  accountId: string,
+  userId: string,
+  input: UpdateAmazonAccountInput
+) {
   const account = await prisma.amazonAccount.findUnique({
     where: { id: accountId },
   })
 
   if (!account) {
     throw new AppError('Amazon account not found', 404)
+  }
+
+  // CRITICAL: Verify ownership to prevent unauthorized updates
+  if (account.userId !== userId) {
+    throw new AppError('Unauthorized to update this account', 403)
   }
 
   const updateData: any = {}

@@ -117,7 +117,6 @@ export async function getAccessToken(
 
   // Use distributed lock to prevent concurrent token refresh
   // This is critical in multi-instance deployments to avoid rate limiting
-  const lockKey = `lock:${cacheKey}`
   const lockValue = `${Date.now()}-${Math.random()}`
   const lockAcquired = await redisService.acquireLock(lockKey, 30, lockValue) // 30 second lock
 
