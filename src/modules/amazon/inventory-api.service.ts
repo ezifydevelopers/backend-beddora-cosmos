@@ -298,45 +298,54 @@ export async function getInventoryItems(
   nextToken?: string
 ): Promise<InventoryItemsResponse> {
   try {
-    const client = new SPAPIWrapper(amazonAccountId)
-    await client.initialize()
-
     if (!marketplaceIds || marketplaceIds.length === 0) {
       const prisma = (await import('../../config/db')).default
       const account = await prisma.amazonAccount.findUnique({
         where: { id: amazonAccountId },
         select: { marketplaceIds: true },
       })
-      marketplaceIds = account?.marketplaceIds && account.marketplaceIds.length > 0 
-        ? account.marketplaceIds 
+      marketplaceIds = account?.marketplaceIds && account.marketplaceIds.length > 0
+        ? account.marketplaceIds
         : ['ATVPDKIKX0DER']
     }
 
-    const params: any = {
-      marketplaceIds: marketplaceIds.join(','),
-    }
-
-    if (sellerSkus && sellerSkus.length > 0) {
-      params.sellerSkus = sellerSkus.join(',')
-    }
-
-    if (nextToken) {
-      params.nextToken = nextToken
-    }
-
-    const response = await client.get<InventoryItemsResponse>(
-      '/fba/inventory/v1/items',
-      params
+    const summaries = await getInventorySummaries(
+      amazonAccountId,
+      marketplaceIds,
+      true,
+      'Marketplace',
+      marketplaceIds[0],
+      nextToken
     )
 
-    logger.debug('Retrieved inventory items', {
+    const inventoryItems: InventoryItem[] =
+      summaries.payload?.inventorySummaries?.map((summary) => ({
+        sellerSku: summary.sellerSku,
+        fnSku: summary.fnSku,
+        asin: summary.asin,
+        condition: summary.condition,
+        totalQuantity: summary.totalQuantity,
+        quantityBreakdown: summary.detailedQuantity?.map((detail) => ({
+          fnSku: summary.fnSku,
+          quantity: detail.quantity,
+          fulfillmentChannel: detail.fulfillmentChannel,
+        })),
+        lastUpdatedTime: summary.lastUpdatedTime,
+      })) || []
+
+    logger.debug('Retrieved inventory items (from summaries)', {
       amazonAccountId,
       skuCount: sellerSkus?.length || 0,
-      itemCount: response.payload?.inventoryItems?.length || 0,
-      hasNextToken: !!response.payload?.pagination?.nextToken,
+      itemCount: inventoryItems.length,
+      hasNextToken: !!summaries.payload?.nextToken,
     })
 
-    return response
+    return {
+      payload: {
+        pagination: summaries.payload?.nextToken ? { nextToken: summaries.payload?.nextToken } : undefined,
+        inventoryItems,
+      },
+    }
   } catch (error) {
     logger.error('Failed to retrieve inventory items', {
       amazonAccountId,
@@ -403,45 +412,56 @@ export async function getInventoryHealth(
   nextToken?: string
 ): Promise<InventoryHealthResponse> {
   try {
-    const client = new SPAPIWrapper(amazonAccountId)
-    await client.initialize()
-
     if (!marketplaceIds || marketplaceIds.length === 0) {
       const prisma = (await import('../../config/db')).default
       const account = await prisma.amazonAccount.findUnique({
         where: { id: amazonAccountId },
         select: { marketplaceIds: true },
       })
-      marketplaceIds = account?.marketplaceIds && account.marketplaceIds.length > 0 
-        ? account.marketplaceIds 
+      marketplaceIds = account?.marketplaceIds && account.marketplaceIds.length > 0
+        ? account.marketplaceIds
         : ['ATVPDKIKX0DER']
     }
 
-    const params: any = {
-      marketplaceIds: marketplaceIds.join(','),
-    }
-
-    if (sellerSkus && sellerSkus.length > 0) {
-      params.sellerSkus = sellerSkus.join(',')
-    }
-
-    if (nextToken) {
-      params.nextToken = nextToken
-    }
-
-    const response = await client.get<InventoryHealthResponse>(
-      '/fba/inventory/v1/health',
-      params
+    const summaries = await getInventorySummaries(
+      amazonAccountId,
+      marketplaceIds,
+      true,
+      'Marketplace',
+      marketplaceIds[0],
+      nextToken
     )
 
-    logger.debug('Retrieved inventory health', {
+    const inventoryHealth: InventoryHealth[] =
+      summaries.payload?.inventorySummaries?.map((summary) => ({
+        sellerSku: summary.sellerSku,
+        fnSku: summary.fnSku,
+        asin: summary.asin,
+        productName: summary.condition,
+        totalQuantity: summary.totalQuantity,
+        inboundQuantity:
+          (summary.inboundWorkingQuantity || 0) +
+          (summary.inboundShippedQuantity || 0) +
+          (summary.inboundReceivingQuantity || 0),
+        reservedQuantity: summary.reservedQuantity?.pendingCustomerOrderQuantity || 0,
+        unfulfillableQuantity: summary.unfulfillableQuantity?.totalUnfulfillableQuantity || 0,
+        availableQuantity: summary.fulfillableQuantity || 0,
+        lastUpdatedTime: summary.lastUpdatedTime,
+      })) || []
+
+    logger.debug('Retrieved inventory health (from summaries)', {
       amazonAccountId,
       skuCount: sellerSkus?.length || 0,
-      healthCount: response.payload?.inventoryHealth?.length || 0,
-      hasNextToken: !!response.payload?.pagination?.nextToken,
+      healthCount: inventoryHealth.length,
+      hasNextToken: !!summaries.payload?.nextToken,
     })
 
-    return response
+    return {
+      payload: {
+        pagination: summaries.payload?.nextToken ? { nextToken: summaries.payload?.nextToken } : undefined,
+        inventoryHealth,
+      },
+    }
   } catch (error) {
     logger.error('Failed to retrieve inventory health', {
       amazonAccountId,

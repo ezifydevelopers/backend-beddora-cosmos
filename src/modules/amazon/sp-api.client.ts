@@ -459,11 +459,35 @@ export class AmazonSPAPIClient {
   async getBuyBoxEligibility(marketplaceId: string, sellerSKUs: string[]) {
     const params = {
       MarketplaceId: marketplaceId,
-      SellerSKU: sellerSKUs.join(','),
+      Skus: sellerSKUs.join(','),
     }
 
-    const response = await this.client.get('/fba/inbound/v0/items', { params })
-    return response.data
+    const response = await this.client.get('/products/pricing/v0/items', { params })
+    const payload = response.data?.payload || []
+    const results: Record<string, { buyBoxEligible: boolean; isBuyBoxWinner?: boolean }> = {}
+
+    for (const item of payload) {
+      const sku =
+        item?.sellerSku ||
+        item?.SellerSKU ||
+        item?.sku ||
+        item?.SKU
+
+      if (!sku) continue
+
+      const offers = item?.product?.offers || item?.offers || []
+      const isBuyBoxWinner = offers.some((offer: any) => offer?.isBuyBoxWinner)
+      const competitive = item?.product?.competitivePricing?.competitivePrices?.some(
+        (price: any) => price?.belongsToRequester
+      )
+
+      results[sku] = {
+        buyBoxEligible: Boolean(isBuyBoxWinner || competitive),
+        isBuyBoxWinner,
+      }
+    }
+
+    return results
   }
 
   // ============================================
@@ -482,19 +506,20 @@ export class AmazonSPAPIClient {
     createdAfter?: string,
     createdBefore?: string
   ) {
-    const params: any = {
-      marketplaceIds: marketplaceIds.join(','),
+    const body: any = {
+      reportType: 'GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA',
+      marketplaceIds,
     }
 
     if (createdAfter) {
-      params.createdAfter = createdAfter
+      body.dataStartTime = createdAfter
     }
 
     if (createdBefore) {
-      params.createdBefore = createdBefore
+      body.dataEndTime = createdBefore
     }
 
-    const response = await this.client.get('/fba/inbound/v0/returns', { params })
+    const response = await this.client.post('/reports/2021-06-30/reports', body)
     return response.data
   }
 
@@ -506,7 +531,7 @@ export class AmazonSPAPIClient {
    * Get product information
    */
   async getProduct(asin: string, marketplaceId: string) {
-    const response = await this.client.get(`/catalog/v0/items/${asin}`, {
+    const response = await this.client.get(`/catalog/2022-04-01/items/${asin}`, {
       params: {
         MarketplaceId: marketplaceId,
       },

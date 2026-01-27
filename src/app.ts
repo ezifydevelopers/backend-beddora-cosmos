@@ -64,8 +64,8 @@ export function createApp(): Express {
 
       // Check Redis connection
       try {
-        const { isRedisAvailable } = await import('./config/redis')
-        healthStatus.services.redis = isRedisAvailable() ? 'ok' : 'unavailable'
+        const { isRedisConnected } = await import('./config/redis')
+        healthStatus.services.redis = isRedisConnected() ? 'ok' : 'unavailable'
       } catch (error) {
         healthStatus.services.redis = 'error'
       }
@@ -74,8 +74,8 @@ export function createApp(): Express {
       const amazonAccountId = req.query.amazonAccountId as string | undefined
       if (amazonAccountId) {
         try {
-          const { SPAPIClient } = await import('./modules/amazon/sp-api-wrapper.service')
-          const client = new SPAPIClient(amazonAccountId)
+          const { SPAPIWrapper } = await import('./modules/amazon/sp-api-wrapper.service')
+          const client = new SPAPIWrapper(amazonAccountId)
           // Try to get a simple endpoint to verify token
           await client.get('/orders/v0/orders', { MarketplaceIds: ['ATVPDKIKX0DER'], MaxResultsPerPage: 1 })
           healthStatus.services.amazonToken = 'valid'

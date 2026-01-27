@@ -1,10 +1,16 @@
 import prisma from '../../config/db'
-import { AmazonSPAPIClient, AmazonCredentials } from './sp-api.client'
 import { logger } from '../../config/logger'
-import { decrypt } from '../../utils/encryption'
 import { AppError } from '../../middlewares/error.middleware'
 import * as accountsService from '../accounts/accounts.service'
 import * as transformers from './transformers'
+import { SPAPIWrapper } from './sp-api-wrapper.service'
+import {
+  createReport,
+  getReportDocument,
+  getReportStatus,
+  ReportStatus,
+  ReportType,
+} from './reports-api.service'
 
 /**
  * Amazon Sync Service
@@ -46,7 +52,7 @@ export interface SyncOptions {
 /**
  * Get initialized SP API client for an account
  */
-async function getClientForAccount(amazonAccountId: string): Promise<AmazonSPAPIClient> {
+async function getClientForAccount(amazonAccountId: string): Promise<SPAPIWrapper> {
   const account = await prisma.amazonAccount.findUnique({
     where: { id: amazonAccountId },
   })
@@ -59,46 +65,245 @@ async function getClientForAccount(amazonAccountId: string): Promise<AmazonSPAPI
     throw new AppError('Amazon account is inactive', 400)
   }
 
-  // Get decrypted credentials
-  const credentials: AmazonCredentials = {
-    clientId: decrypt(account.accessKey),
-    clientSecret: decrypt(account.secretKey),
-    refreshToken: decrypt(account.refreshToken),
-    region: getRegionFromMarketplace(account.marketplace),
-    marketplaceId: account.marketplace,
-  }
-
-  return new AmazonSPAPIClient(credentials)
+  return new SPAPIWrapper(amazonAccountId)
 }
 
 /**
  * Get region from marketplace code
  */
-function getRegionFromMarketplace(marketplace: string): string {
-  const regionMap: Record<string, string> = {
-    US: 'us',
-    CA: 'us',
-    MX: 'us',
-    BR: 'us',
-    UK: 'eu',
-    DE: 'eu',
-    FR: 'eu',
-    IT: 'eu',
-    ES: 'eu',
-    NL: 'eu',
-    SE: 'eu',
-    PL: 'eu',
-    JP: 'fe',
-    AU: 'fe',
-    IN: 'fe',
-    SG: 'fe',
-    AE: 'eu',
-    SA: 'eu',
-    TR: 'eu',
-    EG: 'eu',
+function getMarketplaceId(marketplaceCode: string): string {
+  const marketplaceIds: Record<string, string> = {
+    US: 'ATVPDKIKX0DER',
+    CA: 'A2EUQ1WTGCTBG2',
+    MX: 'A1AM78C64UM0Y8',
+    BR: 'A2Q3Y263D00KWC',
+    UK: 'A1F83G8C2ARO7P',
+    DE: 'A1PA6795UKMFR9',
+    FR: 'A13V1IB3VIYZZH',
+    IT: 'APJ6JRA9NG5V4',
+    ES: 'A1RKKUPIHCS9HS',
+    NL: 'A1805IZSGTT6HS',
+    SE: 'A2NODRKZP88ZB9',
+    PL: 'A1C3SOZRARQ6R3',
+    JP: 'A1VC38T7YXB528',
+    AU: 'A39IBJ37TRP1C6',
+    IN: 'A21TJRUUN4KGV',
+    SG: 'A19VAU5U5O7RUS',
+    AE: 'A2VIGQ35RCS4UG',
+    SA: 'A17E79C6D8DWNP',
+    TR: 'A33AVAJ2PDY3EV',
+    EG: 'ARBP9OOSHTCHU',
   }
 
-  return regionMap[marketplace.toUpperCase()] || 'us'
+  return marketplaceIds[marketplaceCode.toUpperCase()] || marketplaceIds.US
+}
+
+async function getBuyBoxEligibility(
+  client: SPAPIWrapper,
+  marketplaceId: string,
+  sellerSKUs: string[]
+): Promise<Record<string, { buyBoxEligible: boolean; isBuyBoxWinner?: boolean }>> {
+  if (sellerSKUs.length === 0) return {}
+
+  const response = await client.get('/products/pricing/v0/items', {
+    Skus: sellerSKUs.join(','),
+    MarketplaceId: marketplaceId,
+  })
+  const payload = response?.payload || []
+  const results: Record<string, { buyBoxEligible: boolean; isBuyBoxWinner?: boolean }> = {}
+
+  for (const item of payload) {
+    const sku =
+      item?.sellerSku ||
+      item?.SellerSKU ||
+      item?.sku ||
+      item?.SKU
+
+    if (!sku) continue
+
+    const offers = item?.product?.offers || item?.offers || []
+    const isBuyBoxWinner = offers.some((offer: any) => offer?.isBuyBoxWinner)
+    const competitive = item?.product?.competitivePricing?.competitivePrices?.some(
+      (price: any) => price?.belongsToRequester
+    )
+
+    results[sku] = {
+      buyBoxEligible: Boolean(isBuyBoxWinner || competitive),
+      isBuyBoxWinner,
+    }
+  }
+
+  return results
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function parseDelimitedReport(content: string): Array<Record<string, string>> {
+  const lines = content.split(/\r?\n/).filter((line) => line.trim() !== '')
+  if (lines.length === 0) return []
+
+  const delimiter = lines[0].includes('\t') ? '\t' : ','
+  const headers = lines[0].split(delimiter).map((h) => h.trim())
+
+  return lines.slice(1).map((line) => {
+    const values = line.split(delimiter)
+    const row: Record<string, string> = {}
+    headers.forEach((header, index) => {
+      row[normalizeHeader(header)] = values[index]?.trim() ?? ''
+    })
+    return row
+  })
+}
+
+function normalizeHeader(header: string): string {
+  return header.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function getFirstValue(row: Record<string, string>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = row[key]
+    if (value && value.trim() !== '') return value
+  }
+  return undefined
+}
+
+function parseAmount(value?: string): number {
+  if (!value) return 0
+  const normalized = value.replace(/[^0-9.-]/g, '')
+  const parsed = parseFloat(normalized)
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
+async function getReturnsFromReport(
+  amazonAccountId: string,
+  marketplaceId: string,
+  createdAfter?: string,
+  createdBefore?: string
+): Promise<
+  Array<{
+    returnId?: string
+    orderId?: string
+    refundAmount?: { amount?: string }
+    returnReasonCode?: string
+    returnDate?: string
+  }>
+> {
+  const reportId = await createReport(amazonAccountId, {
+    reportType: ReportType.GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA,
+    marketplaceIds: [marketplaceId],
+    dataStartTime: createdAfter,
+    dataEndTime: createdBefore,
+  })
+
+  const maxAttempts = 20
+  let reportDocumentId: string | undefined
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const status = await getReportStatus(amazonAccountId, reportId)
+
+    if (status.processingStatus === ReportStatus.DONE && status.reportDocumentId) {
+      reportDocumentId = status.reportDocumentId
+      break
+    }
+
+    if (status.processingStatus === ReportStatus.CANCELLED || status.processingStatus === ReportStatus.FATAL) {
+      throw new AppError(`Returns report failed with status ${status.processingStatus}`, 500)
+    }
+
+    await sleep(5000)
+  }
+
+  if (!reportDocumentId) {
+    throw new AppError('Returns report did not complete in time', 504)
+  }
+
+  const reportContent = await getReportDocument(amazonAccountId, reportDocumentId)
+  const rows = parseDelimitedReport(reportContent)
+
+  return rows.map((row) => {
+    const returnId = getFirstValue(row, [
+      'returnid',
+      'returnrequestid',
+      'rmaid',
+      'returnitemid',
+    ])
+    const orderId = getFirstValue(row, ['orderid', 'amazonorderid'])
+    const returnReasonCode = getFirstValue(row, ['returnreasoncode', 'returnreason'])
+    const returnDate = getFirstValue(row, [
+      'returndate',
+      'returnrequestdate',
+      'returnrequestdatetime',
+    ])
+    const refundAmountValue = parseAmount(
+      getFirstValue(row, ['refundamount', 'refundtotal', 'amount'])
+    )
+
+    return {
+      returnId,
+      orderId,
+      refundAmount: { amount: refundAmountValue.toString() },
+      returnReasonCode,
+      returnDate,
+    }
+  })
+}
+
+async function getListingsFromReport(
+  amazonAccountId: string,
+  marketplaceId: string
+): Promise<
+  Array<{
+    sellerSku?: string
+    asin?: string
+    price?: { amount?: number }
+    attributes?: { item_name?: string[] }
+  }>
+> {
+  const reportId = await createReport(amazonAccountId, {
+    reportType: ReportType.GET_MERCHANT_LISTINGS_ALL_DATA,
+    marketplaceIds: [marketplaceId],
+  })
+
+  const maxAttempts = 20
+  let reportDocumentId: string | undefined
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const status = await getReportStatus(amazonAccountId, reportId)
+
+    if (status.processingStatus === ReportStatus.DONE && status.reportDocumentId) {
+      reportDocumentId = status.reportDocumentId
+      break
+    }
+
+    if (status.processingStatus === ReportStatus.CANCELLED || status.processingStatus === ReportStatus.FATAL) {
+      throw new AppError(`Listings report failed with status ${status.processingStatus}`, 500)
+    }
+
+    await sleep(5000)
+  }
+
+  if (!reportDocumentId) {
+    throw new AppError('Listings report did not complete in time', 504)
+  }
+
+  const reportContent = await getReportDocument(amazonAccountId, reportDocumentId)
+  const rows = parseDelimitedReport(reportContent)
+
+  return rows.map((row) => {
+    const sellerSku = getFirstValue(row, ['sku', 'sellersku', 'merchantsku'])
+    const asin = getFirstValue(row, ['asin1', 'asin', 'asin2', 'asin3'])
+    const priceValue = parseAmount(getFirstValue(row, ['price', 'standardprice', 'itemprice']))
+    const itemName = getFirstValue(row, ['itemname', 'productname', 'title'])
+
+    return {
+      sellerSku,
+      asin,
+      price: { amount: priceValue },
+      attributes: itemName ? { item_name: [itemName] } : undefined,
+    }
+  })
 }
 
 /**
@@ -191,14 +396,23 @@ export async function syncOrders(
     }
 
     const client = await getClientForAccount(amazonAccountId)
-    const marketplaceId = client.getMarketplaceId(account.marketplace)
+    const marketplaceId = getMarketplaceId(account.marketplace)
 
     // Determine date range
     const createdAfter = options?.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
     const createdBefore = options?.endDate
 
     // Fetch orders
-    const ordersData = await client.getOrders([marketplaceId], createdAfter, createdBefore)
+    const ordersParams: Record<string, any> = {
+      MarketplaceIds: marketplaceId,
+    }
+    if (createdAfter) {
+      ordersParams.CreatedAfter = createdAfter
+    }
+    if (createdBefore) {
+      ordersParams.CreatedBefore = createdBefore
+    }
+    const ordersData = await client.get('/orders/v0/orders', ordersParams)
 
     if (!ordersData.Orders || ordersData.Orders.length === 0) {
       const syncLogId = await createSyncLog(
@@ -228,7 +442,7 @@ export async function syncOrders(
         let orderItems: any[] = []
 
         try {
-          const itemsData = await client.getOrderItems(order.AmazonOrderId)
+          const itemsData = await client.get(`/orders/v0/orders/${order.AmazonOrderId}/orderItems`)
           orderItems = itemsData.OrderItems || []
 
           // Extract fees from order items
@@ -436,7 +650,16 @@ export async function syncFees(
     const postedBefore = options?.endDate
 
     // Fetch financial events
-    const financialEvents = await client.getFinancialEvents(postedAfter, postedBefore)
+    const financialParams: Record<string, any> = {
+      MaxResultsPerPage: 100,
+    }
+    if (postedAfter) {
+      financialParams.PostedAfter = postedAfter
+    }
+    if (postedBefore) {
+      financialParams.PostedBefore = postedBefore
+    }
+    const financialEvents = await client.get('/finances/v0/financialEvents', financialParams)
 
     if (!financialEvents.FinancialEvents) {
       const syncLogId = await createSyncLog(
@@ -608,10 +831,10 @@ export async function syncPPC(
     }
 
     const client = await getClientForAccount(amazonAccountId)
-    const marketplaceId = client.getMarketplaceId(account.marketplace)
+    const marketplaceId = getMarketplaceId(account.marketplace)
 
     // Get advertising profiles
-    const profiles = await client.getAdvertisingProfiles()
+    const profiles = await client.get('/advertising/v2/profiles')
     if (!profiles || profiles.length === 0) {
       const syncLogId = await createSyncLog(
         userId,
@@ -640,35 +863,50 @@ export async function syncPPC(
     for (const profile of profiles) {
       try {
         // Get campaigns
-        const campaigns = await client.getPPCCampaigns(profile.profileId)
+        const campaigns = await client.get(`/advertising/v2/profiles/${profile.profileId}/campaigns`)
         if (!campaigns || campaigns.length === 0) continue
 
         // Get metrics at campaign level
-        const campaignMetrics = await client.getPPCMetrics(profile.profileId, startDate, endDate, [
-          'impressions',
-          'clicks',
-          'cost',
-          'attributedSales14d',
-          'attributedUnitsOrdered14d',
-        ], 'campaign')
+        const campaignMetrics = await client.get(`/advertising/v2/profiles/${profile.profileId}/metrics`, {
+          startDate,
+          endDate,
+          metrics: [
+            'impressions',
+            'clicks',
+            'cost',
+            'attributedSales14d',
+            'attributedUnitsOrdered14d',
+          ].join(','),
+          segment: 'campaign',
+        })
 
         // Get metrics at ad group level
-        const adGroupMetrics = await client.getPPCMetrics(profile.profileId, startDate, endDate, [
-          'impressions',
-          'clicks',
-          'cost',
-          'attributedSales14d',
-          'attributedUnitsOrdered14d',
-        ], 'adGroup')
+        const adGroupMetrics = await client.get(`/advertising/v2/profiles/${profile.profileId}/metrics`, {
+          startDate,
+          endDate,
+          metrics: [
+            'impressions',
+            'clicks',
+            'cost',
+            'attributedSales14d',
+            'attributedUnitsOrdered14d',
+          ].join(','),
+          segment: 'adGroup',
+        })
 
         // Get metrics at keyword level
-        const keywordMetrics = await client.getPPCMetrics(profile.profileId, startDate, endDate, [
-          'impressions',
-          'clicks',
-          'cost',
-          'attributedSales14d',
-          'attributedUnitsOrdered14d',
-        ], 'keyword')
+        const keywordMetrics = await client.get(`/advertising/v2/profiles/${profile.profileId}/metrics`, {
+          startDate,
+          endDate,
+          metrics: [
+            'impressions',
+            'clicks',
+            'cost',
+            'attributedSales14d',
+            'attributedUnitsOrdered14d',
+          ].join(','),
+          segment: 'keyword',
+        })
 
         // Process campaign-level metrics
         if (campaignMetrics) {
@@ -923,10 +1161,15 @@ export async function syncInventory(
     }
 
     const client = await getClientForAccount(amazonAccountId)
-    const marketplaceId = client.getMarketplaceId(account.marketplace)
+    const marketplaceId = getMarketplaceId(account.marketplace)
 
     // Fetch inventory summaries
-    const inventoryData = await client.getInventorySummaries([marketplaceId], true)
+    const inventoryData = await client.get('/fba/inventory/v1/summaries', {
+      marketplaceIds: marketplaceId,
+      details: 'true',
+      granularityType: 'Marketplace',
+      granularityId: marketplaceId,
+    })
 
     if (!inventoryData.payload?.inventorySummaries || inventoryData.payload.inventorySummaries.length === 0) {
       const syncLogId = await createSyncLog(
@@ -1060,10 +1303,12 @@ export async function syncListings(
     }
 
     const client = await getClientForAccount(amazonAccountId)
-    const marketplaceId = client.getMarketplaceId(account.marketplace)
+    const marketplaceId = getMarketplaceId(account.marketplace)
 
     // Fetch listings
-    const listingsData = await client.getListings(marketplaceId)
+    const listingsData = {
+      items: await getListingsFromReport(amazonAccountId, marketplaceId),
+    }
 
     if (!listingsData.items || listingsData.items.length === 0) {
       const syncLogId = await createSyncLog(
@@ -1091,7 +1336,7 @@ export async function syncListings(
 
     if (skus.length > 0) {
       try {
-        buyBoxData = await client.getBuyBoxEligibility(marketplaceId, skus.slice(0, 20)) // Limit to 20 SKUs per request
+        buyBoxData = await getBuyBoxEligibility(client, marketplaceId, skus.slice(0, 20)) // Limit to 20 SKUs per request
       } catch (error: any) {
         logger.warn('Failed to fetch Buy Box eligibility', { error: error.message })
       }
@@ -1206,14 +1451,16 @@ export async function syncRefunds(
     }
 
     const client = await getClientForAccount(amazonAccountId)
-    const marketplaceId = client.getMarketplaceId(account.marketplace)
+    const marketplaceId = getMarketplaceId(account.marketplace)
 
     // Determine date range
     const createdAfter = options?.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
     const createdBefore = options?.endDate
 
     // Fetch returns/refunds
-    const returnsData = await client.getReturns([marketplaceId], createdAfter, createdBefore)
+    const returnsData = {
+      returns: await getReturnsFromReport(amazonAccountId, marketplaceId, createdAfter, createdBefore),
+    }
 
     if (!returnsData.returns || returnsData.returns.length === 0) {
       const syncLogId = await createSyncLog(

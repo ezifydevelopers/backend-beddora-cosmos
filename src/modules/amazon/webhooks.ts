@@ -24,15 +24,30 @@ import { isRedisConnected } from '../../config/redis'
  */
 
 /**
- * Get webhook secret from environment or database
+ * Get webhook secret from database or environment
  * 
- * In production, store webhook secrets per seller in database.
- * For now, uses environment variable.
+ * Priority:
+ * 1) Per-seller secret stored on AmazonAccount
+ * 2) Fallback to environment variable
  */
-function getWebhookSecret(sellerId?: string): string {
-  // TODO: In production, fetch from database per seller
+async function getWebhookSecret(sellerId?: string): Promise<string> {
+  if (sellerId) {
+    const account = (await prisma.amazonAccount.findFirst({
+      where: {
+        OR: [
+          { amazonSellerId: sellerId },
+          { sellerId: sellerId },
+        ],
+      },
+    })) as any
+
+    if (account?.webhookSecret) {
+      return account.webhookSecret as string
+    }
+  }
+
   const secret = process.env.AMAZON_WEBHOOK_SECRET || process.env.AMAZON_SP_API_CLIENT_SECRET || ''
-  
+
   if (!secret) {
     logger.warn('Webhook secret not configured - webhook verification will fail', {
       sellerId,
@@ -48,11 +63,11 @@ function getWebhookSecret(sellerId?: string): string {
  * Validates that the webhook request is from Amazon.
  * Must be called before processing webhook payload.
  */
-export function verifyWebhookSignatureMiddleware(
+export async function verifyWebhookSignatureMiddleware(
   req: Request,
   res: Response,
   next: NextFunction
-): void {
+): Promise<void> {
   try {
     const signature = req.headers['x-amzn-signature'] as string
     const sellerId = (req.body?.sellerId || req.query?.sellerId) as string | undefined
@@ -68,7 +83,7 @@ export function verifyWebhookSignatureMiddleware(
     // Get raw body (Express body-parser may have parsed it)
     // For signature verification, we need the raw body
     const rawBody = (req as any).rawBody || JSON.stringify(req.body)
-    const secret = getWebhookSecret(sellerId)
+    const secret = await getWebhookSecret(sellerId)
 
     if (!secret) {
       logger.error('Webhook secret not configured', {
@@ -500,13 +515,13 @@ export async function handleListingNotification(
           })
 
           logger.debug('Stored listing change from webhook', {
-            sku: changeSku,
+            sku: transformedChange.sku,
             amazonAccountId: account.id,
-            eventType,
+            eventType: transformedChange.eventType,
           })
         } catch (error: any) {
           logger.error('Failed to store listing change from webhook', {
-            sku: changeSku,
+            sku: transformedChange.sku,
             error: error.message,
           })
         }

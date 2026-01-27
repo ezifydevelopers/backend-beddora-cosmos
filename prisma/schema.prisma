@@ -1190,6 +1190,9 @@ model AmazonAccount {
   
   // IAM Role for SP-API
   iamRoleArn      String?  // AWS IAM Role ARN for assuming role (e.g., arn:aws:iam::123456789012:role/SP-API-Role)
+
+  // Webhook secret (per seller)
+  webhookSecret   String?  // Webhook signing secret for this seller
   
   // Marketplace Configuration
   marketplaceIds  String[] // Array of marketplace IDs this seller has access to (e.g., ["ATVPDKIKX0DER", "A2EUQ1WTGCTBG2"])
@@ -1216,6 +1219,7 @@ model AmazonAccount {
   listingChanges ListingChange[]
   refunds      AmazonRefund[]
   syncLogs     SyncLog[]
+  syncSchedules SyncSchedule[]
   orderImports OrderImportStaging[]
   ppcImports   PPCImportStaging[]
   inventoryImports InventoryImportStaging[]
