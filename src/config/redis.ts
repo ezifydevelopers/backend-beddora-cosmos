@@ -18,6 +18,8 @@ import { logger } from './logger'
 
 let redisClient: Redis | null = null
 let isRedisAvailable = false
+let reconnectAttempts = 0
+const MAX_RECONNECT_ATTEMPTS = 5 // Limit reconnection attempts
 
 /**
  * Redis connection options
@@ -36,6 +38,11 @@ function getRedisOptions(): RedisOptions {
       enableReadyCheck: true,
       maxRetriesPerRequest: 3,
       retryStrategy: (times: number) => {
+        // Stop retrying after max attempts
+        if (times > MAX_RECONNECT_ATTEMPTS) {
+          logger.warn('Redis max reconnection attempts reached, stopping retries')
+          return null // Stop retrying
+        }
         const delay = Math.min(times * 50, 2000)
         return delay
       },
@@ -47,6 +54,8 @@ function getRedisOptions(): RedisOptions {
         }
         return false
       },
+      // Disable auto-reconnect after max attempts
+      lazyConnect: false,
     }
   }
 
@@ -59,6 +68,11 @@ function getRedisOptions(): RedisOptions {
     enableReadyCheck: true,
     maxRetriesPerRequest: 3,
     retryStrategy: (times: number) => {
+      // Stop retrying after max attempts
+      if (times > MAX_RECONNECT_ATTEMPTS) {
+        logger.warn('Redis max reconnection attempts reached, stopping retries')
+        return null // Stop retrying
+      }
       const delay = Math.min(times * 50, 2000)
       return delay
     },
@@ -69,6 +83,8 @@ function getRedisOptions(): RedisOptions {
       }
       return false
     },
+    // Disable auto-reconnect after max attempts
+    lazyConnect: false,
   }
 }
 
@@ -98,39 +114,91 @@ export async function initializeRedis(): Promise<void> {
 
     // Set up event handlers
     redisClient.on('connect', () => {
+      reconnectAttempts = 0 // Reset on successful connect
       logger.info('Redis client connecting...')
     })
 
     redisClient.on('ready', () => {
+      reconnectAttempts = 0 // Reset on ready
       isRedisAvailable = true
       logger.info('Redis client ready and connected')
     })
 
     redisClient.on('error', (error: Error) => {
       isRedisAvailable = false
-      logger.warn('Redis client error (app will use in-memory fallback)', {
-        error: error.message,
-      })
+      // Only log first few errors to avoid spam
+      if (reconnectAttempts < 3) {
+        logger.warn('Redis client error (app will use in-memory fallback)', {
+          error: error.message,
+        })
+      }
     })
 
     redisClient.on('close', () => {
       isRedisAvailable = false
-      logger.warn('Redis connection closed (app will use in-memory fallback)')
+      reconnectAttempts++
+      // Only log first few closes to avoid spam
+      if (reconnectAttempts <= 3) {
+        logger.warn('Redis connection closed (app will use in-memory fallback)')
+      }
+      // Stop reconnecting after max attempts
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        logger.warn('Redis max reconnection attempts reached, disabling Redis')
+        if (redisClient) {
+          redisClient.disconnect()
+          redisClient = null
+        }
+      }
     })
 
     redisClient.on('reconnecting', () => {
-      logger.info('Redis client reconnecting...')
+      reconnectAttempts++
+      // Only log first few reconnection attempts
+      if (reconnectAttempts <= 3) {
+        logger.info('Redis client reconnecting...')
+      }
+      // Stop reconnecting after max attempts
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        logger.warn('Redis max reconnection attempts reached, stopping reconnection attempts')
+        if (redisClient) {
+          redisClient.disconnect()
+          redisClient = null
+        }
+      }
     })
 
-    // Test connection
-    await redisClient.ping()
-    isRedisAvailable = true
-    logger.info('Redis connection successful')
+    // Test connection with timeout
+    try {
+      await Promise.race([
+        redisClient.ping(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Redis connection timeout')), 5000)
+        )
+      ])
+      isRedisAvailable = true
+      reconnectAttempts = 0
+      logger.info('Redis connection successful')
+    } catch (pingError) {
+      // If ping fails, disconnect and use fallback
+      logger.warn('Redis ping failed, disabling Redis connection', {
+        error: (pingError as Error).message,
+      })
+      if (redisClient) {
+        redisClient.disconnect()
+        redisClient = null
+      }
+      isRedisAvailable = false
+    }
   } catch (error) {
     isRedisAvailable = false
     logger.warn('Failed to initialize Redis (app will use in-memory fallback)', {
       error: (error as Error).message,
     })
+    // Clean up client if it was created
+    if (redisClient) {
+      redisClient.disconnect()
+      redisClient = null
+    }
     // Don't throw - app should continue without Redis
   }
 }

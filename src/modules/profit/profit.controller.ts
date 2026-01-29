@@ -441,6 +441,75 @@ export async function getPLByPeriods(
 }
 
 /**
+ * GET /profit/summary/multiple-periods
+ * Get profit summary for multiple periods in one request
+ * Optimized endpoint to reduce API calls from frontend
+ * 
+ * Query Parameters:
+ * - accountId: Filter by account ID (required)
+ * - amazonAccountId: Filter by Amazon account ID (optional)
+ * - marketplaceId: Filter by marketplace ID (optional)
+ * - periods: Comma-separated list of periods to fetch (e.g., "today,yesterday,7days,14days,30days")
+ *   Defaults to all periods if not specified
+ * 
+ * Returns: Object with period keys and ProfitSummary values
+ * 
+ * Example Response:
+ * {
+ *   "success": true,
+ *   "data": {
+ *     "today": { ...ProfitSummary },
+ *     "yesterday": { ...ProfitSummary },
+ *     "7days": { ...ProfitSummary },
+ *     "14days": { ...ProfitSummary },
+ *     "30days": { ...ProfitSummary }
+ *   }
+ * }
+ */
+export async function getProfitSummaryMultiplePeriods(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.userId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const accountId = req.query.accountId as string | undefined
+    if (!accountId) {
+      res.status(400).json({
+        success: false,
+        error: 'accountId is required',
+      })
+      return
+    }
+
+    const periodsParam = (req.query.periods as string) || 'today,yesterday,7days,14days,30days'
+    const requestedPeriods = periodsParam.split(',').map(p => p.trim())
+
+    const result = await profitService.getProfitSummaryMultiplePeriods(
+      {
+        accountId,
+        amazonAccountId: req.query.amazonAccountId as string | undefined,
+        marketplaceId: req.query.marketplaceId as string | undefined,
+      },
+      requestedPeriods,
+      req.userId
+    )
+
+    res.status(200).json({
+      success: true,
+      data: result,
+    })
+  } catch (error: any) {
+    logger.error('Failed to get profit summary for multiple periods', { error, userId: req.userId })
+    next(error)
+  }
+}
+
+/**
  * GET /profit/map
  * Get profit breakdown by country for map visualization
  * 

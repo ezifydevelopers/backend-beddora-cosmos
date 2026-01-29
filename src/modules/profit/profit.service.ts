@@ -368,6 +368,82 @@ export async function getProfitSummary(
   }
 }
 
+/**
+ * Get profit summary for multiple periods in one request
+ * Optimized to reduce API calls - fetches all requested periods in parallel
+ * 
+ * @param baseFilters - Base filters (accountId, marketplaceId, etc.) without date range
+ * @param periods - Array of period identifiers: 'today', 'yesterday', '7days', '14days', '30days'
+ * @param userId - User ID for access verification
+ * @returns Object with period keys and ProfitSummary values
+ */
+export async function getProfitSummaryMultiplePeriods(
+  baseFilters: Omit<ProfitFilters, 'startDate' | 'endDate'>,
+  periods: string[],
+  userId: string
+): Promise<Record<string, ProfitSummary>> {
+  // Helper to get date range for a period
+  const getDateRangeForPeriod = (period: string): { startDate: string; endDate: string } => {
+    const end = new Date()
+    const start = new Date()
+    end.setHours(23, 59, 59, 999) // End of day
+
+    switch (period) {
+      case 'today':
+        start.setHours(0, 0, 0, 0)
+        break
+      case 'yesterday':
+        start.setDate(start.getDate() - 1)
+        start.setHours(0, 0, 0, 0)
+        end.setDate(end.getDate() - 1)
+        end.setHours(23, 59, 59, 999)
+        break
+      case '7days':
+        start.setDate(start.getDate() - 6) // Last 7 days (including today)
+        start.setHours(0, 0, 0, 0)
+        break
+      case '14days':
+        start.setDate(start.getDate() - 13) // Last 14 days (including today)
+        start.setHours(0, 0, 0, 0)
+        break
+      case '30days':
+        start.setDate(start.getDate() - 29) // Last 30 days (including today)
+        start.setHours(0, 0, 0, 0)
+        break
+      default:
+        // Default to today if period is unknown
+        start.setHours(0, 0, 0, 0)
+    }
+
+    return {
+      startDate: start.toISOString().split('T')[0],
+      endDate: end.toISOString().split('T')[0],
+    }
+  }
+
+  // Fetch all periods in parallel for better performance
+  const periodPromises = periods.map(async (period) => {
+    const dateRange = getDateRangeForPeriod(period)
+    const filters: ProfitFilters = {
+      ...baseFilters,
+      startDate: dateRange.startDate,
+      endDate: dateRange.endDate,
+    }
+    const summary = await getProfitSummary(filters, userId)
+    return { period, summary }
+  })
+
+  const results = await Promise.all(periodPromises)
+
+  // Convert array to object with period keys
+  const resultMap: Record<string, ProfitSummary> = {}
+  results.forEach(({ period, summary }) => {
+    resultMap[period] = summary
+  })
+
+  return resultMap
+}
+
 // ============================================
 // PRODUCT BREAKDOWN
 // ============================================

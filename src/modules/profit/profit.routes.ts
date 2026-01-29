@@ -31,6 +31,7 @@ router.use(authenticate)
 
 // All profit routes require profit.read permission
 router.get('/summary', requirePermission('profit', 'read'), profitController.getProfitSummary)
+router.get('/summary/multiple-periods', requirePermission('profit', 'read'), profitController.getProfitSummaryMultiplePeriods)
 router.get('/by-product', requirePermission('profit', 'read'), profitController.getProfitByProduct)
 router.get(
   '/by-marketplace',
