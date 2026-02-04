@@ -1,6 +1,7 @@
 import express, { Express } from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
+import compression from 'compression'
 import morgan from 'morgan'
 import cookieParser from 'cookie-parser'
 import { env } from './config/env'
@@ -14,6 +15,9 @@ import { registerRoutes } from './routes'
  */
 export function createApp(): Express {
   const app = express()
+
+  // Gzip compression for responses (reduces payload size)
+  app.use(compression())
 
   // Security middleware
   app.use(helmet())
