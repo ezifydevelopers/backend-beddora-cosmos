@@ -171,9 +171,9 @@ export async function initializeRedis(): Promise<void> {
     try {
       await Promise.race([
         redisClient.ping(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Redis connection timeout')), 5000)
-        )
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Redis connection timeout')), 2000)
+        ),
       ])
       isRedisAvailable = true
       reconnectAttempts = 0

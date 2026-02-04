@@ -2,6 +2,13 @@
 
 If the app feels slow on the server, use this checklist.
 
+## Quick fix (do this first)
+
+1. **Backend:** In `.env` set `NODE_ENV=production`. If you don’t use Redis/queues, set **`REDIS_ENABLED=false`** so startup isn’t delayed by Redis connection (timeout is 2s).
+2. **Backend:** Run **`npm run build`** then **`npm start`** (never `npm run dev` on the server).
+3. **Frontend:** Run **`npm run build`** then **`npm start`** (never `npm run dev` on the server). Set **`NEXT_PUBLIC_API_URL`** to your backend URL.
+4. **Database:** Add **`?connection_limit=10`** to `DATABASE_URL` so Prisma doesn’t open too many connections.
+
 ## 1. Run in production mode
 
 - Set in `.env`: **`NODE_ENV=production`**
