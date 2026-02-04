@@ -22,13 +22,6 @@ import { UserProfileResponse, UpdateUserProfileData } from '../../types/user.typ
 export async function getCurrentUser(userId: string): Promise<UserProfileResponse> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: {
-      roles: {
-        include: {
-          role: true,
-        },
-      },
-    },
     select: {
       id: true,
       email: true,
